@@ -2,7 +2,6 @@
 .gradle/
 /local.properties
 /.idea/
-/.cursor/
 .DS_Store
 /build/
 /app/build/
@@ -17,3 +16,9 @@
 bin/
 gen/
 out/
+.kotlin/
+
+# 本地构建/调试临时产物
+/build-*.txt
+/kt-err*.txt
+/filter.png
