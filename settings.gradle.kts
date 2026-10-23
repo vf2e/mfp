@@ -31,5 +31,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Guopian"
+rootProject.name = "Guotu"
 include(":app")

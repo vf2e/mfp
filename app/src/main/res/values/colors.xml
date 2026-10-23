@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="guopian_canvas">#FFF3F5F5</color>
-    <color name="guopian_ink">#FF141C1E</color>
-    <color name="guopian_signal">#FFFF6A1A</color>
-    <color name="guopian_slate">#FF1B2E32</color>
+    <color name="guotu_canvas">#FFF3F5F5</color>
+    <color name="guotu_ink">#FF141C1E</color>
+    <color name="guotu_signal">#FFFF6A1A</color>
+    <color name="guotu_slate">#FF1B2E32</color>
     <color name="ic_launcher_background">#FF1B2E32</color>
 </resources>

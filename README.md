@@ -1,60 +1,53 @@
-# 过片（Guopian）
+# 过图（Guotu）
 
-本地视频快速浏览、标记与剪切整理 Android App。
+本地图片快速浏览、标记与剪切整理 Android App。
 
-**副标题：** 本地视频，滑动过一遍就整理好  
-**包名：** `com.guopian.app`  
+**副标题：** 本地图片，滑动过一遍就整理好  
+**包名：** `com.guotu.app`  
 **最低系统：** Android 8.0（API 26）
 
-## 文档
+面向**几十万张**深层级本地图片库：选总文件夹 → 递归扫描扁平索引 → 网格浏览 / 上下滑过图 → 边看边标 → 一键剪切归档。
 
-见 [`docs/README.md`](docs/README.md)。
+## 当前能力
 
-## 当前进度
-
-- [x] M0 工程骨架（Compose / Hilt / Navigation / 主题）
-- [x] M1 起步：SAF 选根目录、Room、扫描 Worker、视频库网格
-- [x] M2：快捷筛选芯片、路径/搜索、多选批量标记
-- [x] M3：短视频式上下滑动浏览 + ExoPlayer + 双击保留/标记栏
-- [x] `assembleDebug` 已通过
-- [ ] M4 VLC 兜底播放（**不做缩略图**）
-- [ ] M5 剪切任务
-
-### 范围变更
-
-- **不做缩略图**：列表仅用扩展名/标记占位，不截帧、不缓存封面；已移除 Coil 依赖。
+- [x] SAF / 全部文件访问选根目录
+- [x] WorkManager 流式扫描入库（分批 upsert，适合超大图库）
+- [x] Room + Paging 图库网格（Coil 缩略图）
+- [x] 快捷筛选：全部 / 收藏 / 待定 / 待删除 / 已剪切
+- [x] 上下滑全屏过图 + 双击标记 + 底栏收藏/待定/剪切
+- [x] 批量剪切任务
+- [x] `assembleDebug`（见下方编译）
 
 ## 环境要求
 
-- JDK **17**（推荐 `C:\Program Files\Microsoft\jdk-17.*`）
+- JDK **17**
 - Android SDK（compileSdk / targetSdk 35）
 - 推荐用 Android Studio 打开本目录
 
-> 若 Gradle 报连不上仓库，检查 `~/.gradle/gradle.properties` 里是否配置了已关闭的本地代理（如 `127.0.0.1:7890`）。本机若代理未开，需注释掉这些行。
+> 若 Gradle 报连不上仓库，检查 `~/.gradle/gradle.properties` 里是否配置了已关闭的本地代理。
 
 ## 编译
 
 ```powershell
 $env:JAVA_HOME="C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot"
-# 若已生成 wrapper：
 .\gradlew.bat assembleDebug
-# 或使用本机 Gradle 8.11.1：
-# & "$env:TEMP\gradle-8.11.1\bin\gradle.bat" assembleDebug
 ```
 
-Debug APK 输出：
+Debug APK：
 
 `app/build/outputs/apk/debug/app-debug.apk`
 
-## 模块结构（单 module 包分区）
+## 模块结构
 
 ```
-app/src/main/java/com/guopian/app/
-  ui/           # Compose 界面
+app/src/main/java/com/guotu/app/
+  ui/           # Compose 界面（图库 / 滑动过图 / 设置…）
   data/         # Room / DataStore / Repository / SAF
   domain/       # 领域模型
-  work/         # WorkManager
-  media/        # 播放引擎（后续）
+  work/         # WorkManager（扫描 / 剪切）
+  player/       # PlaylistSession（过图分页会话）
   di/           # Hilt
   core/         # 工具
 ```
+
+姊妹项目：[过片 Guopian](../mfv)（视频版）。

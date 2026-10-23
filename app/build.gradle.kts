@@ -8,20 +8,17 @@ plugins {
 }
 
 android {
-    namespace = "com.guopian.app"
+    namespace = "com.guotu.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.guopian.app"
+        applicationId = "com.guotu.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
-        }
     }
 
     buildTypes {
@@ -55,10 +52,6 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-        jniLibs {
-            // LibVLC ships multiple ABIs; avoid install-time conflicts on some devices.
-            useLegacyPackaging = true
         }
     }
 }
@@ -95,17 +88,13 @@ dependencies {
     implementation(libs.paging.runtime)
     implementation(libs.paging.compose)
 
-    implementation(libs.media3.exoplayer)
-    implementation(libs.media3.ui)
-    implementation(libs.media3.session)
-    implementation(libs.media3.common)
-
     implementation(libs.work.runtime)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
+    implementation(libs.coil.compose)
+
     implementation(libs.timber)
     implementation(libs.accompanist.permissions)
-    implementation(libs.libvlc.all)
 }

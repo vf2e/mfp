@@ -2,11 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <!-- 选择 Android/ 等受限目录需要「所有文件访问」；本地视频整理场景使用 -->
+    <!-- 选择 Android/ 等受限目录需要「所有文件访问」；本地图片整理场景使用 -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
@@ -14,7 +14,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
-        android:name=".GuopianApplication"
+        android:name=".GuotuApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -22,13 +22,13 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Guopian"
+        android:theme="@style/Theme.Guotu"
         tools:targetApi="35">
 
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Guopian"
+            android:theme="@style/Theme.Guotu"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
