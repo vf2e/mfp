@@ -262,6 +262,7 @@ fun SwipeBrowseScreen(
             }
         } else {
             key(uiState.playlistEpoch) {
+                val docUris by viewModel.docUris.collectAsStateWithLifecycle()
                 val epochPager = rememberPagerState(
                     initialPage = uiState.currentIndex.coerceIn(0, (total - 1).coerceAtLeast(0)),
                     pageCount = { uiState.total.coerceAtLeast(1) },
@@ -284,7 +285,7 @@ fun SwipeBrowseScreen(
                     key = { page -> "${uiState.playlistEpoch}-$page" },
                 ) { page ->
                     ImagePage(
-                        docUri = viewModel.docUriAt(page),
+                        docUri = docUris[page],
                         isCurrent = page == epochPager.settledPage,
                         markGestureEnabled = uiState.swipeMarkEnabled && pagerScrollEnabled,
                         onTap = { viewModel.toggleUi() },

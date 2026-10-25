@@ -87,6 +87,28 @@ class ImageRepository @Inject constructor(
         )
     }
 
+    suspend fun queryPage(
+        rootId: Long,
+        filter: FilterSpec,
+        sort: SortSpec,
+        randomSeed: Long,
+        pageSize: Int,
+        pageIndex: Int,
+    ): List<ImageEntity> {
+        val size = pageSize.coerceIn(20, 500)
+        val index = pageIndex.coerceAtLeast(0)
+        return imageDao.queryImages(
+            ImageQueryBuilder.buildPageQuery(
+                rootId = rootId,
+                filter = filter,
+                sort = sort,
+                randomSeed = randomSeed,
+                limit = size,
+                offset = index * size,
+            ),
+        )
+    }
+
     suspend fun countFiltered(rootId: Long, filter: FilterSpec): Int {
         return imageDao.countByQuery(ImageQueryBuilder.buildCountQuery(rootId, filter))
     }

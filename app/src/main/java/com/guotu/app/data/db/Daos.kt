@@ -50,6 +50,9 @@ interface ImageDao {
     fun pagingByQuery(query: SupportSQLiteQuery): PagingSource<Int, ImageEntity>
 
     @RawQuery(observedEntities = [ImageEntity::class])
+    suspend fun queryImages(query: SupportSQLiteQuery): List<ImageEntity>
+
+    @RawQuery(observedEntities = [ImageEntity::class])
     suspend fun queryIds(query: SupportSQLiteQuery): List<Long>
 
     @RawQuery(observedEntities = [ImageEntity::class])

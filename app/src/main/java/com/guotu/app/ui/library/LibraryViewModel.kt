@@ -4,8 +4,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.paging.PagingData
-import androidx.paging.cachedIn
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.guotu.app.data.db.ImageEntity
@@ -29,19 +27,23 @@ import com.guotu.app.work.ScanScheduler
 import com.guotu.app.work.ScanWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,6 +61,7 @@ enum class QuickFilter {
 }
 
 data class LibraryUiState(
+    val rootResolved: Boolean = false,
     val hasRoot: Boolean = false,
     val rootId: Long? = null,
     val rootPath: String? = null,
@@ -83,6 +86,9 @@ data class LibraryUiState(
     val scanResultMessage: String? = null,
     val lastRelativePath: String? = null,
     val pageSize: Int = 100,
+    val pageIndex: Int = 0,
+    val pageCount: Int = 0,
+    val pageLoading: Boolean = true,
     val gridColumns: Int = 0,
     val stats: LibraryStats = LibraryStats(),
     val actionMessage: String? = null,
@@ -106,60 +112,48 @@ class LibraryViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val rootFlow = rootFolderRepository.observeCurrent()
+    private val rootState = MutableStateFlow<com.guotu.app.data.db.RootFolderEntity?>(null)
+    private val rootResolved = MutableStateFlow(false)
     private val filterState = MutableStateFlow(LibraryUiState())
 
     val folderPresets: StateFlow<List<FolderPresetEntity>> = folderPresetDao.observeRecent()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
+            started = SharingStarted.Eagerly,
             initialValue = emptyList(),
         )
 
     val tags: StateFlow<List<com.guotu.app.data.db.TagEntity>> = tagDao.observeAll()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
+            started = SharingStarted.Eagerly,
             initialValue = emptyList(),
         )
 
-    private val scanInfoFlow = WorkManager.getInstance(context)
+    private val scanInfoState: StateFlow<WorkInfo?> = WorkManager.getInstance(context)
         .getWorkInfosForUniqueWorkFlow(ScanWorker.UNIQUE_WORK)
         .map { infos -> infos.firstOrNull() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val randomSeed = System.currentTimeMillis()
     private val lastRelativePath = MutableStateFlow<String?>(null)
     private val pageSizeFlow = settingsRepository.pageSize
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 100)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 100)
     private val gridColumnsFlow = settingsRepository.gridColumns
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+    private val pageIndex = MutableStateFlow(0)
+    private val pageReload = MutableStateFlow(0)
+    private val pageLoading = MutableStateFlow(true)
     private val actionMessage = MutableStateFlow<String?>(null)
     private var appliedDefaultFilter = false
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val statsFlow: Flow<LibraryStats> = rootFlow.flatMapLatest { root ->
+    private val statsFlow: Flow<LibraryStats> = rootState.flatMapLatest { root ->
         if (root == null) flowOf(LibraryStats()) else imageRepository.observeStats(root.id)
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val images: Flow<PagingData<ImageEntity>> = combine(
-        rootFlow,
-        filterState,
-        pageSizeFlow,
-    ) { root, ui, pageSize ->
-        Triple(root, ui, pageSize)
-    }.flatMapLatest { (root, ui, pageSize) ->
-        if (root == null) {
-            flowOf(PagingData.empty())
-        } else {
-            imageRepository.pagingImages(
-                rootId = root.id,
-                filter = ui.toFilterSpec(),
-                sort = ui.sort,
-                randomSeed = randomSeed,
-                pageSize = pageSize,
-            )
-        }
-    }.cachedIn(viewModelScope)
+    private val _pageImages = MutableStateFlow<List<ImageEntity>>(emptyList())
+    val pageImages: StateFlow<List<ImageEntity>> = _pageImages.asStateFlow()
 
     private val filteredCount = MutableStateFlow(0)
     private val scanResultMessage = MutableStateFlow<String?>(null)
@@ -171,22 +165,47 @@ class LibraryViewModel @Inject constructor(
                 appliedDefaultFilter = true
                 filterState.update { it.copy(quickFilter = QuickFilter.UNSORTED) }
             }
+            bootstrapLibrary()
+            observePageQueries()
         }
         viewModelScope.launch {
             rootFlow.collect { root ->
+                if (root?.id != rootState.value?.id || root?.treeUri != rootState.value?.treeUri) {
+                    rootState.value = root
+                }
                 if (root == null) {
                     lastRelativePath.value = null
-                } else {
-                    lastRelativePath.value = browseStateStore.read(Uri.parse(root.treeUri)).lastRelativePath
+                } else if (lastRelativePath.value == null) {
+                    lastRelativePath.value = withContext(Dispatchers.IO) {
+                        browseStateStore.read(Uri.parse(root.treeUri)).lastRelativePath
+                    }
                 }
             }
         }
         viewModelScope.launch {
-            combine(rootFlow, filterState) { root, ui -> root to ui }.collect { (root, ui) ->
+            rootResolved.first { it }
+            combine(rootState, filterState) { root, ui -> root to ui }.collect { (root, ui) ->
                 if (root == null) {
                     filteredCount.value = 0
                 } else {
-                    filteredCount.value = imageRepository.countFiltered(root.id, ui.toFilterSpec())
+                    filteredCount.value = withContext(Dispatchers.IO) {
+                        imageRepository.countFiltered(root.id, ui.toFilterSpec())
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            combine(filterState, pageSizeFlow) { _, _ -> }.collect {
+                if (pageIndex.value != 0) pageIndex.value = 0
+            }
+        }
+        viewModelScope.launch {
+            combine(filteredCount, pageSizeFlow, pageIndex) { count, size, index ->
+                Triple(count, size, index)
+            }.collect { (count, size, index) ->
+                val pages = if (count <= 0 || size <= 0) 0 else (count + size - 1) / size
+                if (pages > 0 && index >= pages) {
+                    pageIndex.value = pages - 1
                 }
             }
         }
@@ -199,7 +218,15 @@ class LibraryViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            scanInfoFlow.collect { work ->
+            var ignoreHistorical = true
+            scanInfoState.collect { work ->
+                if (ignoreHistorical) {
+                    ignoreHistorical = false
+                    lastHandledScanId = work?.takeIf {
+                        it.state == WorkInfo.State.SUCCEEDED || it.state == WorkInfo.State.FAILED
+                    }?.id
+                    return@collect
+                }
                 if (work == null) return@collect
                 if (work.state == WorkInfo.State.SUCCEEDED && work.id != lastHandledScanId) {
                     lastHandledScanId = work.id
@@ -210,14 +237,13 @@ class LibraryViewModel @Inject constructor(
                     } else {
                         "扫描完成：在「$folder」发现 $n 张图片"
                     }
-                    // refresh filtered count after DB write
                     val root = rootFolderRepository.getCurrent()
                     if (root != null) {
-                        filteredCount.value = imageRepository.countFiltered(
-                            root.id,
-                            filterState.value.toFilterSpec(),
-                        )
+                        filteredCount.value = withContext(Dispatchers.IO) {
+                            imageRepository.countFiltered(root.id, filterState.value.toFilterSpec())
+                        }
                     }
+                    bumpPageReload()
                 } else if (work.state == WorkInfo.State.FAILED && work.id != lastHandledScanId) {
                     lastHandledScanId = work.id
                     scanResultMessage.value = work.outputData.getString(ScanWorker.KEY_ERROR)
@@ -227,7 +253,100 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    private suspend fun bootstrapLibrary() {
+        pageLoading.value = true
+        val (root, pageSize) = withContext(Dispatchers.IO) {
+            rootFolderRepository.getCurrent() to settingsRepository.pageSize.first()
+        }
+        rootState.value = root
+        if (root == null) {
+            _pageImages.value = emptyList()
+            filteredCount.value = 0
+            pageLoading.value = false
+            rootResolved.value = true
+            return
+        }
+        val ui = filterState.value
+        val (count, page) = withContext(Dispatchers.IO) {
+            val filter = ui.toFilterSpec()
+            val c = imageRepository.countFiltered(root.id, filter)
+            val p = imageRepository.queryPage(
+                rootId = root.id,
+                filter = filter,
+                sort = ui.sort,
+                randomSeed = randomSeed,
+                pageSize = pageSize,
+                pageIndex = 0,
+            )
+            c to p
+        }
+        filteredCount.value = count
+        _pageImages.value = page
+        lastRelativePath.value = withContext(Dispatchers.IO) {
+            browseStateStore.read(Uri.parse(root.treeUri)).lastRelativePath
+        }
+        pageLoading.value = false
+        rootResolved.value = true
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun observePageQueries() {
+        combine(
+            rootState,
+            filterState,
+            pageSizeFlow,
+            pageIndex,
+            pageReload,
+        ) { root, ui, pageSize, index, _ ->
+            PageQuery(root?.id, ui, pageSize, index)
+        }.mapLatest { query ->
+            val rootId = query.rootId
+            if (rootId == null) {
+                pageLoading.value = false
+                emptyList()
+            } else {
+                pageLoading.value = true
+                try {
+                    withContext(Dispatchers.IO) {
+                        imageRepository.queryPage(
+                            rootId = rootId,
+                            filter = query.ui.toFilterSpec(),
+                            sort = query.ui.sort,
+                            randomSeed = randomSeed,
+                            pageSize = query.pageSize,
+                            pageIndex = query.pageIndex,
+                        )
+                    }
+                } finally {
+                    pageLoading.value = false
+                }
+            }
+        }.collect { list ->
+            _pageImages.value = list
+        }
+    }
+
+    private fun bumpPageReload() {
+        pageReload.update { it + 1 }
+    }
+
+    fun nextPage() {
+        val count = filteredCount.value
+        val size = pageSizeFlow.value
+        val pages = if (count <= 0 || size <= 0) 0 else (count + size - 1) / size
+        if (pageIndex.value + 1 < pages) {
+            pageIndex.value = pageIndex.value + 1
+        }
+    }
+
+    fun previousPage() {
+        if (pageIndex.value > 0) {
+            pageIndex.value = pageIndex.value - 1
+        }
+    }
+
     private fun applyBrowseRequest(request: LibraryBrowseRequest) {
+        pageIndex.value = 0
         filterState.update {
             when (request) {
                 is LibraryBrowseRequest.ByMarks -> it.copy(
@@ -275,6 +394,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun clearExternalFilter() {
+        pageIndex.value = 0
         filterState.update {
             it.copy(
                 filterExtensions = emptySet(),
@@ -287,8 +407,8 @@ class LibraryViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<LibraryUiState> = combine(
-        combine(rootFlow, filteredCount, scanInfoFlow, statsFlow) { root, count, work, stats ->
-            RootBundle(root, count, work, stats)
+        combine(rootState, filteredCount, scanInfoState, rootResolved) { root, count, work, resolved ->
+            RootBundle(root, count, work, resolved)
         },
         combine(
             combine(filterState, scanResultMessage, lastRelativePath) { filter, scanMsg, last ->
@@ -297,7 +417,10 @@ class LibraryViewModel @Inject constructor(
             combine(pageSizeFlow, gridColumnsFlow, actionMessage) { pageSize, gridColumns, action ->
                 Triple(pageSize, gridColumns, action)
             },
-        ) { filterTriple, pageTriple ->
+            combine(pageIndex, pageLoading, statsFlow) { index, loading, stats ->
+                Triple(index, loading, stats)
+            },
+        ) { filterTriple, pageTriple, pageMeta ->
             LibraryExtras(
                 filter = filterTriple.first,
                 scanMsg = filterTriple.second,
@@ -305,6 +428,9 @@ class LibraryViewModel @Inject constructor(
                 pageSize = pageTriple.first,
                 gridColumns = pageTriple.second,
                 action = pageTriple.third,
+                pageIndex = pageMeta.first,
+                pageLoading = pageMeta.second,
+                stats = pageMeta.third,
             )
         },
     ) { rootBundle, extras ->
@@ -316,7 +442,13 @@ class LibraryViewModel @Inject constructor(
         } else {
             null
         }
+        val pages = if (rootBundle.count <= 0 || extras.pageSize <= 0) {
+            0
+        } else {
+            (rootBundle.count + extras.pageSize - 1) / extras.pageSize
+        }
         extras.filter.copy(
+            rootResolved = rootBundle.resolved,
             hasRoot = rootBundle.root != null,
             rootId = rootBundle.root?.id,
             rootPath = rootBundle.root?.displayPath,
@@ -327,8 +459,11 @@ class LibraryViewModel @Inject constructor(
             scanResultMessage = extras.scanMsg,
             lastRelativePath = extras.lastPath,
             pageSize = extras.pageSize,
+            pageIndex = extras.pageIndex,
+            pageCount = pages,
+            pageLoading = extras.pageLoading,
             gridColumns = extras.gridColumns,
-            stats = rootBundle.stats,
+            stats = extras.stats,
             actionMessage = extras.action,
         )
     }.stateIn(
@@ -341,7 +476,7 @@ class LibraryViewModel @Inject constructor(
         val root: com.guotu.app.data.db.RootFolderEntity?,
         val count: Int,
         val work: WorkInfo?,
-        val stats: LibraryStats,
+        val resolved: Boolean,
     )
 
     private data class LibraryExtras(
@@ -351,6 +486,16 @@ class LibraryViewModel @Inject constructor(
         val pageSize: Int,
         val gridColumns: Int,
         val action: String?,
+        val pageIndex: Int,
+        val pageLoading: Boolean,
+        val stats: LibraryStats,
+    )
+
+    private data class PageQuery(
+        val rootId: Long?,
+        val ui: LibraryUiState,
+        val pageSize: Int,
+        val pageIndex: Int,
     )
 
     fun onRootSelected(uri: Uri) {
@@ -372,6 +517,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun setQuickFilter(filter: QuickFilter) {
+        pageIndex.value = 0
         filterState.update {
             it.copy(
                 quickFilter = filter,
@@ -396,14 +542,17 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun setPathKeyword(keyword: String) {
+        pageIndex.value = 0
         filterState.update { it.copy(pathKeyword = keyword) }
     }
 
     fun setQueryText(text: String) {
+        pageIndex.value = 0
         filterState.update { it.copy(queryText = text) }
     }
 
     fun setSort(key: SortKey) {
+        pageIndex.value = 0
         filterState.update {
             val asc = if (it.sort.key == key) !it.sort.ascending else false
             it.copy(sort = SortSpec(key, asc))

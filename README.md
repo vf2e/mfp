@@ -21,6 +21,7 @@
 - [x] 看图按屏解码（大 JPEG 不再黑屏）、HEIC/HEIF（Android 9+ ImageDecoder）
 - [x] 图库紧凑顶栏 + 方形缩略图网格
 - [x] 启动检测 GitHub Release 更新（通知 + 应用内下载安装）
+- [x] 图库离散分页（首屏预取）+ 过图首张即时解码
 - [x] `assembleDebug`（见下方编译）
 
 ## 环境要求

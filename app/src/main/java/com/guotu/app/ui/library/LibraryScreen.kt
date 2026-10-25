@@ -3,7 +3,6 @@ package com.guotu.app.ui.library
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -34,8 +34,6 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,13 +52,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -68,11 +65,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.paging.LoadState
-import androidx.paging.compose.collectAsLazyPagingItems
 import com.guotu.app.R
 import com.guotu.app.core.util.FileSizeFormatter
-import com.guotu.app.core.util.PathAbbreviator
 import com.guotu.app.core.util.StorageAccessHelper
 import com.guotu.app.data.db.ImageEntity
 import com.guotu.app.domain.model.MarkStatus
@@ -95,7 +89,7 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val images = viewModel.images.collectAsLazyPagingItems()
+    val images by viewModel.pageImages.collectAsStateWithLifecycle()
     val presets by viewModel.folderPresets.collectAsStateWithLifecycle()
     val tags by viewModel.tags.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -287,6 +281,8 @@ fun LibraryScreen(
                 onCutFiltered = viewModel::prepareCutCurrentFilter,
                 onPurgeToDelete = { showPurgeConfirm = true },
                 onExportKeep = viewModel::exportKeepList,
+                onPrevPage = viewModel::previousPage,
+                onNextPage = viewModel::nextPage,
                 browsingEnabled = !uiState.isScanning,
                 onOpenItem = { imageId ->
                     scope.launch {
@@ -461,7 +457,7 @@ private fun SelectionBar(
 private fun LibraryContent(
     modifier: Modifier,
     uiState: LibraryUiState,
-    images: androidx.paging.compose.LazyPagingItems<ImageEntity>,
+    images: List<ImageEntity>,
     showSearch: Boolean,
     onQuickFilter: (QuickFilter) -> Unit,
     onClearExternalFilter: () -> Unit,
@@ -477,6 +473,8 @@ private fun LibraryContent(
     onCutFiltered: () -> Unit,
     onPurgeToDelete: () -> Unit,
     onExportKeep: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
     browsingEnabled: Boolean,
     onOpenItem: (Long) -> Unit,
 ) {
@@ -485,7 +483,14 @@ private fun LibraryContent(
             ProgressStatsBar(stats = uiState.stats, filtered = uiState.imageCount)
         }
         QuickFilterRow(current = uiState.quickFilter, onSelect = onQuickFilter)
-        SortRow(sort = uiState.sort, onSelect = onSetSort)
+        SortRow(
+            sort = uiState.sort,
+            imageCount = uiState.imageCount,
+            pageIndex = uiState.pageIndex,
+            pageCount = uiState.pageCount,
+            pageSize = uiState.pageSize,
+            onSelect = onSetSort,
+        )
 
         uiState.externalFilterLabel?.let { label ->
             Row(
@@ -516,7 +521,7 @@ private fun LibraryContent(
             }
         }
 
-        if (uiState.imageCount > 0 || images.itemCount > 0) {
+        if (uiState.imageCount > 0 || images.isNotEmpty()) {
             BrowseActionRow(
                 hasLast = !uiState.lastRelativePath.isNullOrBlank(),
                 toDeleteCount = uiState.stats.toDelete,
@@ -557,10 +562,13 @@ private fun LibraryContent(
             )
         }
 
-        val showLoading = uiState.isScanning && images.itemCount == 0
-        val showEmpty = !showLoading &&
-            images.itemCount == 0 &&
-            images.loadState.refresh is LoadState.NotLoading
+        val showLoading = (uiState.isScanning || uiState.pageLoading || !uiState.rootResolved) &&
+            images.isEmpty()
+        val showEmpty = uiState.rootResolved &&
+            !uiState.pageLoading &&
+            !uiState.isScanning &&
+            images.isEmpty() &&
+            uiState.imageCount == 0
 
         when {
             showLoading -> {
@@ -578,25 +586,24 @@ private fun LibraryContent(
                 )
             }
             else -> {
-                LazyVerticalGrid(
-                    columns = when (uiState.gridColumns) {
-                        2, 3, 4 -> GridCells.Fixed(uiState.gridColumns)
-                        else -> GridCells.Adaptive(120.dp)
-                    },
-                    contentPadding = PaddingValues(
-                        horizontal = GuotuDimens.Page,
-                        vertical = GuotuDimens.Grid,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
-                    horizontalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    items(
-                        count = images.itemCount,
-                        key = { index -> images.peek(index)?.id ?: index },
-                    ) { index ->
-                        val item = images[index]
-                        if (item != null) {
+                Column(modifier = Modifier.weight(1f)) {
+                    LazyVerticalGrid(
+                        columns = when (uiState.gridColumns) {
+                            2, 3, 4 -> GridCells.Fixed(uiState.gridColumns)
+                            else -> GridCells.Adaptive(120.dp)
+                        },
+                        contentPadding = PaddingValues(
+                            horizontal = GuotuDimens.Page,
+                            vertical = GuotuDimens.Grid,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
+                        horizontalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        items(
+                            items = images,
+                            key = { it.id },
+                        ) { item ->
                             ImageGridItem(
                                 image = item,
                                 selected = item.id in uiState.selectedIds,
@@ -612,6 +619,14 @@ private fun LibraryContent(
                             )
                         }
                     }
+                    if (uiState.pageCount > 1) {
+                        LibraryPageBar(
+                            pageIndex = uiState.pageIndex,
+                            pageCount = uiState.pageCount,
+                            onPrev = onPrevPage,
+                            onNext = onNextPage,
+                        )
+                    }
                 }
             }
         }
@@ -619,10 +634,74 @@ private fun LibraryContent(
 }
 
 @Composable
+private fun LibraryPageBar(
+    pageIndex: Int,
+    pageCount: Int,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val canPrev = pageIndex > 0
+    val canNext = pageIndex + 1 < pageCount
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(GuotuDimens.Hairline)
+                .background(GuotuColors.Rule),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(GuotuColors.Panel)
+                .padding(horizontal = GuotuDimens.Page, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.library_page_prev),
+                modifier = Modifier
+                    .clip(GuotuButtonShape)
+                    .clickable(enabled = canPrev, onClick = onPrev)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (canPrev) GuotuColors.Signal else GuotuColors.InkMute.copy(alpha = 0.45f),
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(
+                    R.string.library_page_indicator,
+                    pageIndex + 1,
+                    pageCount,
+                ),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = GuotuColors.InkMute,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = stringResource(R.string.library_page_next),
+                modifier = Modifier
+                    .clip(GuotuButtonShape)
+                    .clickable(enabled = canNext, onClick = onNext)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (canNext) GuotuColors.Signal else GuotuColors.InkMute.copy(alpha = 0.45f),
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SortRow(
     sort: com.guotu.app.domain.model.SortSpec,
+    imageCount: Int,
+    pageIndex: Int,
+    pageCount: Int,
+    pageSize: Int,
     onSelect: (SortKey) -> Unit,
 ) {
+    val displayPage = if (pageCount <= 0) 0 else pageIndex + 1
+    val displayCount = pageCount.coerceAtLeast(if (imageCount > 0) 1 else 0)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -631,6 +710,23 @@ private fun SortRow(
         horizontalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Text(
+            text = stringResource(
+                R.string.image_count_paged,
+                imageCount,
+                displayPage,
+                displayCount,
+                pageSize,
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = GuotuColors.InkMute,
+            maxLines = 1,
+        )
+        Text(
+            text = "·",
+            style = MaterialTheme.typography.labelMedium,
+            color = GuotuColors.Rule,
+        )
         Text(
             text = stringResource(R.string.sort_label),
             style = MaterialTheme.typography.labelLarge,

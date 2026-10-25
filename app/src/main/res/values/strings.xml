@@ -160,4 +160,8 @@
     <string name="update_install">立即安装</string>
     <string name="settings_check_update">检查更新</string>
     <string name="settings_check_update_hint">从 GitHub Release 检查并下载新版本</string>
+    <string name="image_count_paged">共 %1$d 张 · 第 %2$d/%3$d 页 · 每页 %4$d</string>
+    <string name="library_page_prev">上一页</string>
+    <string name="library_page_next">下一页</string>
+    <string name="library_page_indicator">第 %1$d / %2$d 页</string>
 </resources>

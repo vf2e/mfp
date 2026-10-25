@@ -92,7 +92,9 @@ class SwipeBrowseViewModel @Inject constructor(
             initialValue = emptyList(),
         )
 
-    private val docUriByPage = mutableMapOf<Int, String>()
+    private val _docUris = MutableStateFlow<Map<Int, String>>(emptyMap())
+    val docUris: StateFlow<Map<Int, String>> = _docUris.asStateFlow()
+
     private var observeJob: Job? = null
     private val undoStack = ArrayDeque<UndoEntry>(16)
 
@@ -107,11 +109,20 @@ class SwipeBrowseViewModel @Inject constructor(
                 _uiState.update { it.copy(swapSwipeMark = swap) }
             }
         }
-        val snap = playlistSession.current()
-        if (snap == null || snap.ids.isEmpty()) {
-            _uiState.update { it.copy(error = "浏览列表为空") }
-        } else {
+        viewModelScope.launch {
+            val snap = playlistSession.current()
+            if (snap == null || snap.ids.isEmpty()) {
+                _uiState.update { it.copy(error = "浏览列表为空") }
+                return@launch
+            }
             val index = startIndexArg.coerceIn(0, snap.ids.lastIndex)
+            // 先同步拉当前张 URI，避免首屏空白要靠下滑才触发重组
+            val image = withContext(Dispatchers.IO) {
+                imageRepository.getById(snap.ids[index])
+            }
+            image?.docUri?.takeIf { it.isNotBlank() }?.let { uri ->
+                _docUris.value = mapOf(index to uri)
+            }
             _uiState.update {
                 it.copy(
                     ready = true,
@@ -121,6 +132,8 @@ class SwipeBrowseViewModel @Inject constructor(
                     pageCount = snap.pageCount,
                     totalInLibrary = snap.totalCount,
                     playlistEpoch = 1,
+                    image = image,
+                    markStatus = image?.let { v -> markImageUseCase.statusOf(v) } ?: MarkStatus.TO_DELETE,
                 )
             }
             onPageSettled(index)
@@ -128,8 +141,6 @@ class SwipeBrowseViewModel @Inject constructor(
     }
 
     fun idAt(page: Int): Long? = playlistSession.idAt(page)
-
-    fun docUriAt(page: Int): String? = docUriByPage[page]
 
     fun onPageSettled(index: Int) {
         val snap = playlistSession.current() ?: return
@@ -140,7 +151,10 @@ class SwipeBrowseViewModel @Inject constructor(
 
         viewModelScope.launch {
             val imageId = snap.ids[index]
-            val image = imageRepository.getById(imageId)
+            val image = withContext(Dispatchers.IO) { imageRepository.getById(imageId) }
+            image?.docUri?.takeIf { it.isNotBlank() }?.let { uri ->
+                _docUris.update { it + (index to uri) }
+            }
             _uiState.update {
                 it.copy(
                     currentIndex = index,
@@ -158,6 +172,9 @@ class SwipeBrowseViewModel @Inject constructor(
             observeJob = viewModelScope.launch {
                 imageRepository.observeById(imageId).collect { entity ->
                     if (entity != null && _uiState.value.currentIndex == index) {
+                        entity.docUri.takeIf { it.isNotBlank() }?.let { uri ->
+                            _docUris.update { it + (index to uri) }
+                        }
                         _uiState.update {
                             it.copy(
                                 image = entity,
@@ -172,14 +189,24 @@ class SwipeBrowseViewModel @Inject constructor(
 
     private fun prefetchPages(center: Int) {
         val snap = playlistSession.current() ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            val extras = mutableMapOf<Int, String>()
             for (page in (center - 1)..(center + 1)) {
                 if (page !in snap.ids.indices) continue
-                if (docUriByPage.containsKey(page)) continue
+                if (_docUris.value.containsKey(page)) continue
                 val id = snap.ids[page]
-                imageRepository.getById(id)?.let { docUriByPage[page] = it.docUri }
+                imageRepository.getById(id)?.docUri?.takeIf { it.isNotBlank() }?.let { uri ->
+                    extras[page] = uri
+                }
+            }
+            if (extras.isNotEmpty()) {
+                _docUris.update { it + extras }
             }
         }
+    }
+
+    private fun clearDocUris() {
+        _docUris.value = emptyMap()
     }
 
     private fun persistBrowseCursor(image: ImageEntity) {
@@ -383,7 +410,7 @@ class SwipeBrowseViewModel @Inject constructor(
         if (!snap.hasPrevPage) return
         viewModelScope.launch {
             val result = playlistSession.openPage(snap.pageIndex - 1) ?: return@launch
-            docUriByPage.clear()
+            clearDocUris()
             val last = (result.snapshot.ids.size - 1).coerceAtLeast(0)
             _uiState.update {
                 it.copy(
@@ -412,7 +439,7 @@ class SwipeBrowseViewModel @Inject constructor(
         if (!snap.hasNextPage) return
         viewModelScope.launch {
             val result = playlistSession.openPage(snap.pageIndex + 1) ?: return@launch
-            docUriByPage.clear()
+            clearDocUris()
             _uiState.update {
                 it.copy(
                     ready = true,
