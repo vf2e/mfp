@@ -26,7 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -277,7 +277,7 @@ fun SwipeBrowseScreen(
                     epochPager.scrollToPage(target.coerceIn(0, (uiState.total - 1).coerceAtLeast(0)))
                     viewModel.consumePendingScroll()
                 }
-                VerticalPager(
+                HorizontalPager(
                     state = epochPager,
                     modifier = Modifier.fillMaxSize(),
                     beyondViewportPageCount = 1,
@@ -290,8 +290,8 @@ fun SwipeBrowseScreen(
                         markGestureEnabled = uiState.swipeMarkEnabled && pagerScrollEnabled,
                         onTap = { viewModel.toggleUi() },
                         onDoubleTap = viewModel::onDoubleTap,
-                        onSwipeRight = viewModel::onHorizontalSwipeRight,
-                        onSwipeLeft = viewModel::onHorizontalSwipeLeft,
+                        onMarkKeep = viewModel::onHorizontalSwipeRight,
+                        onMarkReject = viewModel::onHorizontalSwipeLeft,
                         onZoomChanged = { zoomed ->
                             if (page == epochPager.settledPage) {
                                 pagerScrollEnabled = !zoomed
@@ -384,20 +384,20 @@ private fun ImagePage(
     markGestureEnabled: Boolean,
     onTap: () -> Unit,
     onDoubleTap: () -> Unit,
-    onSwipeRight: () -> Unit,
-    onSwipeLeft: () -> Unit,
+    onMarkKeep: () -> Unit,
+    onMarkReject: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
 ) {
     var scale by remember(docUri) { mutableFloatStateOf(1f) }
     var offset by remember(docUri) { mutableStateOf(Offset.Zero) }
-    var dragX by remember { mutableFloatStateOf(0f) }
+    var dragY by remember { mutableFloatStateOf(0f) }
     val zoomed = scale > 1.01f
 
     LaunchedEffect(isCurrent) {
         if (!isCurrent) {
             scale = 1f
             offset = Offset.Zero
-            dragX = 0f
+            dragY = 0f
             onZoomChanged(false)
         }
     }
@@ -432,7 +432,7 @@ private fun ImagePage(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            // 仅放大后启用单指拖移；未放大时 canPan=false，把单指留给 VerticalPager
+            // 未放大时把单指左右滑留给 HorizontalPager；放大后可拖移
             .then(
                 if (isCurrent) {
                     Modifier.transformable(
@@ -464,15 +464,16 @@ private fun ImagePage(
             )
             .then(
                 if (canMarkSwipe) {
+                    // 上下滑标记，避免与左右翻页冲突
                     Modifier.pointerInput(canMarkSwipe, docUri) {
                         val touchSlop = viewConfiguration.touchSlop
-                        val threshold = size.width * 0.22f
+                        val threshold = size.height * 0.18f
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false)
                             var totalX = 0f
                             var totalY = 0f
-                            var axis: Int? = null // 1=X, 2=Y
-                            dragX = 0f
+                            var axis: Int? = null // 1=X 翻页, 2=Y 标记
+                            dragY = 0f
                             while (true) {
                                 val event = awaitPointerEvent()
                                 val change = event.changes.firstOrNull() ?: break
@@ -484,18 +485,18 @@ private fun ImagePage(
                                     val ax = abs(totalX)
                                     val ay = abs(totalY)
                                     if (ax > touchSlop || ay > touchSlop) {
-                                        axis = if (ax > ay) 1 else 2
+                                        axis = if (ay > ax) 2 else 1
                                     }
                                 }
-                                if (axis == 1) {
+                                if (axis == 2) {
                                     change.consume()
-                                    dragX = totalX
+                                    dragY = totalY
                                 }
-                                // axis==Y：不 consume，交给 VerticalPager
+                                // axis==X：不 consume，交给 HorizontalPager
                             }
-                            if (axis == 1) {
+                            if (axis == 2) {
                                 when {
-                                    dragX > threshold -> {
+                                    dragY < -threshold -> {
                                         hapticView.performHapticFeedback(
                                             if (Build.VERSION.SDK_INT >= 30) {
                                                 android.view.HapticFeedbackConstants.CONFIRM
@@ -503,9 +504,9 @@ private fun ImagePage(
                                                 android.view.HapticFeedbackConstants.CONTEXT_CLICK
                                             },
                                         )
-                                        onSwipeRight()
+                                        onMarkKeep()
                                     }
-                                    dragX < -threshold -> {
+                                    dragY > threshold -> {
                                         hapticView.performHapticFeedback(
                                             if (Build.VERSION.SDK_INT >= 30) {
                                                 android.view.HapticFeedbackConstants.REJECT
@@ -513,11 +514,11 @@ private fun ImagePage(
                                                 android.view.HapticFeedbackConstants.LONG_PRESS
                                             },
                                         )
-                                        onSwipeLeft()
+                                        onMarkReject()
                                     }
                                 }
                             }
-                            dragX = 0f
+                            dragY = 0f
                         }
                     }
                 } else {
@@ -527,8 +528,8 @@ private fun ImagePage(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                translationX = offset.x + if (canMarkSwipe) dragX * 0.35f else 0f
-                translationY = offset.y
+                translationX = offset.x
+                translationY = offset.y + if (canMarkSwipe) dragY * 0.28f else 0f
             },
         contentAlignment = Alignment.Center,
     ) {

@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
 import javax.inject.Inject
 
 data class AppUpdateUiState(
@@ -38,18 +37,27 @@ class AppUpdateViewModel @Inject constructor(
     fun checkOnLaunch() {
         if (autoChecked) return
         autoChecked = true
-        check(silent = true, notify = true)
+        check(silent = true, notify = true, openDialogIfAvailable = false)
     }
 
+    /** 仅检查，有新版本时提示，不直接开始下载。 */
     fun checkManual() {
-        check(silent = false, notify = false)
+        check(silent = false, notify = false, openDialogIfAvailable = false)
     }
 
+    /** 已确认有新版本后，打开更新对话框。 */
     fun openUpdateDialog() {
-        if (_uiState.value.available != null) {
-            _uiState.update { it.copy(showDialog = true, statusMessage = null) }
+        val available = _uiState.value.available
+        if (available != null) {
+            _uiState.update {
+                it.copy(
+                    showDialog = true,
+                    statusMessage = null,
+                    download = DownloadState.Idle,
+                )
+            }
         } else {
-            check(silent = false, notify = false)
+            check(silent = false, notify = false, openDialogIfAvailable = true)
         }
     }
 
@@ -65,32 +73,39 @@ class AppUpdateViewModel @Inject constructor(
     fun startDownload() {
         val update = _uiState.value.available ?: return
         viewModelScope.launch {
-            _uiState.update { it.copy(download = DownloadState.Progress(0)) }
+            _uiState.update { it.copy(download = DownloadState.Progress(0), showDialog = true) }
             val result = repository.downloadApk(update) { pct ->
                 _uiState.update { state ->
-                    state.copy(download = DownloadState.Progress(pct))
+                    state.copy(download = DownloadState.Progress(pct), showDialog = true)
                 }
             }
             result.fold(
                 onSuccess = { file ->
                     notifier.cancel()
-                    _uiState.update { it.copy(download = DownloadState.Ready(file)) }
+                    _uiState.update {
+                        it.copy(
+                            download = DownloadState.Ready(file),
+                            showDialog = true,
+                        )
+                    }
                 },
                 onFailure = { t ->
                     _uiState.update {
-                        it.copy(download = DownloadState.Failed(t.message ?: "下载失败"))
+                        it.copy(
+                            download = DownloadState.Failed(t.message ?: "下载失败"),
+                            showDialog = true,
+                        )
                     }
                 },
             )
         }
     }
 
-    fun consumeReadyApk(): File? {
-        val ready = _uiState.value.download as? DownloadState.Ready ?: return null
-        return ready.apkFile
-    }
-
-    private fun check(silent: Boolean, notify: Boolean) {
+    private fun check(
+        silent: Boolean,
+        notify: Boolean,
+        openDialogIfAvailable: Boolean,
+    ) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -104,8 +119,13 @@ class AppUpdateViewModel @Inject constructor(
                         it.copy(
                             checking = false,
                             available = result.update,
-                            showDialog = true,
-                            statusMessage = null,
+                            showDialog = openDialogIfAvailable,
+                            download = if (openDialogIfAvailable) DownloadState.Idle else it.download,
+                            statusMessage = if (silent || openDialogIfAvailable) {
+                                null
+                            } else {
+                                "发现新版本 v${result.update.versionName}，可点击更新"
+                            },
                         )
                     }
                     if (notify) notifier.notifyUpdateAvailable(result.update)

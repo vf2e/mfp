@@ -61,7 +61,10 @@ import androidx.compose.runtime.LaunchedEffect
 @Composable
 fun SettingsScreen(
     onCheckUpdate: () -> Unit = {},
+    onOpenUpdate: () -> Unit = {},
     updateChecking: Boolean = false,
+    updateAvailableName: String? = null,
+    updateDownloadPercent: Int? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
@@ -255,15 +258,38 @@ fun SettingsScreen(
                 )
                 GuotuHairline()
                 LinkRow(
-                    title = stringResource(R.string.settings_check_update),
-                    subtitle = if (updateChecking) {
-                        stringResource(R.string.update_downloading_short)
-                    } else {
-                        stringResource(R.string.settings_check_update_hint)
+                    title = when {
+                        updateDownloadPercent != null -> stringResource(R.string.settings_updating)
+                        updateAvailableName != null -> stringResource(R.string.settings_update_available)
+                        else -> stringResource(R.string.settings_check_update)
                     },
-                    onClick = onCheckUpdate,
+                    subtitle = when {
+                        updateChecking -> stringResource(R.string.settings_checking_update)
+                        updateDownloadPercent != null -> stringResource(
+                            R.string.update_downloading,
+                            updateDownloadPercent,
+                        )
+                        updateAvailableName != null -> stringResource(
+                            R.string.settings_update_available_hint,
+                            updateAvailableName,
+                        )
+                        else -> stringResource(R.string.settings_check_update_hint)
+                    },
+                    onClick = {
+                        when {
+                            updateDownloadPercent != null -> onOpenUpdate()
+                            updateAvailableName != null -> onOpenUpdate()
+                            updateChecking -> Unit
+                            else -> onCheckUpdate()
+                        }
+                    },
                     chevron = false,
-                    actionHint = stringResource(R.string.settings_tap_to_run),
+                    actionHint = when {
+                        updateChecking -> null
+                        updateDownloadPercent != null -> "$updateDownloadPercent%"
+                        updateAvailableName != null -> stringResource(R.string.settings_do_update)
+                        else -> stringResource(R.string.settings_do_check)
+                    },
                 )
                 GuotuHairline()
                 Text(

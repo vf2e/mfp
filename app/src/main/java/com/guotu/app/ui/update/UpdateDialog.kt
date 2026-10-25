@@ -82,11 +82,12 @@ fun AppUpdateHost(
                     when (download) {
                         is DownloadState.Progress -> {
                             Text(stringResource(R.string.update_downloading, download.percent))
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             LinearProgressIndicator(
                                 progress = { download.percent / 100f },
                                 modifier = Modifier.fillMaxWidth(),
                                 color = GuotuColors.Signal,
+                                trackColor = GuotuColors.Rule,
                             )
                         }
                         is DownloadState.Failed -> {
@@ -97,6 +98,13 @@ fun AppUpdateHost(
                         }
                         is DownloadState.Ready -> {
                             Text(stringResource(R.string.update_ready))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { 1f },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = GuotuColors.Signal,
+                                trackColor = GuotuColors.Rule,
+                            )
                         }
                         DownloadState.Idle -> {
                             Text(stringResource(R.string.update_dialog_body))

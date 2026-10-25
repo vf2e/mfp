@@ -149,7 +149,10 @@ private fun GuotuApp(
                     rootNav.navigate("swipe/$startIndex")
                 },
                 onCheckUpdate = updateViewModel::checkManual,
+                onOpenUpdate = updateViewModel::openUpdateDialog,
                 updateChecking = updateUi.checking,
+                updateAvailableName = updateUi.available?.versionName,
+                updateDownloadPercent = (updateUi.download as? com.guotu.app.data.update.DownloadState.Progress)?.percent,
             )
         }
         composable(
@@ -219,7 +222,10 @@ private fun MainShell(
     showTagsTabFlow: MainViewModel,
     onOpenSwipe: (Int) -> Unit,
     onCheckUpdate: () -> Unit,
+    onOpenUpdate: () -> Unit,
     updateChecking: Boolean,
+    updateAvailableName: String?,
+    updateDownloadPercent: Int?,
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -265,7 +271,10 @@ private fun MainShell(
             navController = navController,
             onOpenSwipe = onOpenSwipe,
             onCheckUpdate = onCheckUpdate,
+            onOpenUpdate = onOpenUpdate,
             updateChecking = updateChecking,
+            updateAvailableName = updateAvailableName,
+            updateDownloadPercent = updateDownloadPercent,
             showTagsTab = showTagsTab,
             modifier = Modifier
                 .fillMaxSize()
@@ -279,7 +288,10 @@ private fun MainTabNavHost(
     navController: NavHostController,
     onOpenSwipe: (Int) -> Unit,
     onCheckUpdate: () -> Unit,
+    onOpenUpdate: () -> Unit,
     updateChecking: Boolean,
+    updateAvailableName: String?,
+    updateDownloadPercent: Int?,
     showTagsTab: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -324,7 +336,10 @@ private fun MainTabNavHost(
         composable(TopLevelDestination.Settings.route) {
             SettingsScreen(
                 onCheckUpdate = onCheckUpdate,
+                onOpenUpdate = onOpenUpdate,
                 updateChecking = updateChecking,
+                updateAvailableName = updateAvailableName,
+                updateDownloadPercent = updateDownloadPercent,
             )
         }
     }

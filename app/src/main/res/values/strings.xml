@@ -27,8 +27,8 @@
     <string name="settings_double_tap">双击动作</string>
     <string name="settings_double_tap_hint">滑动浏览时双击屏幕</string>
     <string name="settings_double_tap_play">无操作</string>
-    <string name="settings_swap_swipe">对调左右滑标记</string>
-    <string name="settings_swap_swipe_hint">开启后：左滑收藏、右滑待删除</string>
+    <string name="settings_swap_swipe">对调上下滑标记</string>
+    <string name="settings_swap_swipe_hint">开启后：上滑待删除、下滑收藏</string>
     <string name="action_more">更多操作</string>
     <string name="purge_confirm_title">确认删除待删文件？</string>
     <string name="purge_confirm_body">将永久删除最多 %1$d 张标记为「待删除」的图片，无法从本 App 撤销。建议先确认筛选无误。</string>
@@ -68,8 +68,8 @@
     <string name="settings_grid_columns">图库列数</string>
     <string name="settings_grid_columns_hint">0 为自适应；密集浏览可选 3/4 列</string>
     <string name="settings_grid_auto">自适应</string>
-    <string name="settings_swipe_mark">左右滑标记</string>
-    <string name="settings_swipe_mark_hint">过图时右滑收藏、左滑待删除，并自动下一张</string>
+    <string name="settings_swipe_mark">上下滑标记</string>
+    <string name="settings_swipe_mark_hint">过图时上滑收藏、下滑待删除；左右滑切换图片</string>
     <string name="settings_default_unreviewed">默认看未整理</string>
     <string name="settings_default_unreviewed_hint">打开图库时优先筛选待删除/未整理图片</string>
     <string name="mark_unsorted">待删除</string>
@@ -93,7 +93,7 @@
     <string name="settings_page_size_value">%1$d 条/页</string>
     <string name="swipe_page_indicator">第 %1$d/%2$d 页 · 本页 %3$d · 共 %4$d</string>
     <string name="action_cut_filtered">剪切本列表</string>
-    <string name="browse_hint">点「开始过图」按当前筛选进入。上下滑翻页；右滑收藏、左滑待删；双击收藏；音量键翻页；可撤销上一次标记。</string>
+    <string name="browse_hint">点「开始过图」按当前筛选进入。左右滑切换图片；上滑收藏、下滑待删；双击收藏；音量键翻页；可撤销。</string>
     <string name="swipe_loading">正在打开滑动浏览…</string>
     <string name="action_landscape">横屏</string>
     <string name="action_portrait">竖屏</string>
@@ -159,7 +159,13 @@
     <string name="update_ready">下载完成，可以安装</string>
     <string name="update_install">立即安装</string>
     <string name="settings_check_update">检查更新</string>
-    <string name="settings_check_update_hint">从 GitHub Release 检查并下载新版本</string>
+    <string name="settings_check_update_hint">先检查是否有新版本，有再点更新</string>
+    <string name="settings_checking_update">正在检查…</string>
+    <string name="settings_update_available">发现新版本</string>
+    <string name="settings_update_available_hint">v%1$s 可更新，点右侧「更新」下载安装</string>
+    <string name="settings_updating">正在更新</string>
+    <string name="settings_do_check">检查</string>
+    <string name="settings_do_update">更新</string>
     <string name="image_count_paged">共 %1$d 张 · 第 %2$d/%3$d 页 · 每页 %4$d</string>
     <string name="library_page_prev">上一页</string>
     <string name="library_page_next">下一页</string>
