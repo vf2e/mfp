@@ -3,16 +3,29 @@ package com.guotu.app.data.repo
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
-import com.guotu.app.data.db.MarkedPathRow
 import com.guotu.app.data.db.ImageDao
 import com.guotu.app.data.db.ImageEntity
 import com.guotu.app.data.db.ImageQueryBuilder
+import com.guotu.app.data.db.MarkedPathRow
+import com.guotu.app.data.db.StatusCountRow
 import com.guotu.app.domain.model.FilterSpec
 import com.guotu.app.domain.model.MarkStatus
 import com.guotu.app.domain.model.SortSpec
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
+
+data class LibraryStats(
+    val total: Int = 0,
+    val keep: Int = 0,
+    val pending: Int = 0,
+    val toDelete: Int = 0,
+    val moved: Int = 0,
+) {
+    val unreviewed: Int get() = (toDelete).coerceAtLeast(0)
+    val progressDone: Int get() = keep + pending + moved
+}
 
 data class MarkPatch(
     val status: MarkStatus? = null,
@@ -28,6 +41,15 @@ class ImageRepository @Inject constructor(
     private val imageDao: ImageDao,
 ) {
     fun observeCount(rootId: Long): Flow<Int> = imageDao.observeCount(rootId)
+
+    fun observeStats(rootId: Long): Flow<LibraryStats> =
+        imageDao.observeStatusCounts(rootId).map { rows -> rows.toStats() }
+
+    suspend fun listIdsByStatus(rootId: Long, status: MarkStatus, limit: Int): List<Long> =
+        imageDao.listIdsByStatus(rootId, status.name, limit)
+
+    suspend fun getByIds(ids: List<Long>): List<ImageEntity> =
+        if (ids.isEmpty()) emptyList() else imageDao.getByIds(ids)
 
     fun pagingImages(
         rootId: Long,
@@ -110,4 +132,28 @@ class ImageRepository @Inject constructor(
             clearNote = if (patch.clearNote) 1 else 0,
         )
     }
+}
+
+private fun List<StatusCountRow>.toStats(): LibraryStats {
+    var keep = 0
+    var pending = 0
+    var toDelete = 0
+    var moved = 0
+    var total = 0
+    for (row in this) {
+        total += row.cnt
+        when (row.markStatus) {
+            MarkStatus.KEEP.name -> keep += row.cnt
+            MarkStatus.PENDING.name -> pending += row.cnt
+            MarkStatus.MOVED.name -> moved += row.cnt
+            MarkStatus.TO_DELETE.name, MarkStatus.UNSORTED.name -> toDelete += row.cnt
+        }
+    }
+    return LibraryStats(
+        total = total,
+        keep = keep,
+        pending = pending,
+        toDelete = toDelete,
+        moved = moved,
+    )
 }

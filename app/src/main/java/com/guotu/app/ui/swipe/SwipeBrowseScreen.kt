@@ -9,6 +9,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -25,8 +26,11 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,7 +52,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -58,10 +64,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.guotu.app.R
+import com.guotu.app.domain.model.MarkStatus
 import com.guotu.app.ui.cut.CutTargetSheet
 import com.guotu.app.ui.util.OpenDocumentTreeContract
 import com.guotu.app.ui.util.launchDocumentTreePreferAndroid
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import android.view.KeyEvent
+import android.view.View
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -163,6 +173,54 @@ fun SwipeBrowseScreen(
         viewModel.clearCutMessage()
     }
 
+    LaunchedEffect(uiState.undoHint, uiState.canUndo) {
+        val hint = uiState.undoHint ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = hint,
+            actionLabel = if (uiState.canUndo) "撤销" else null,
+            duration = SnackbarDuration.Short,
+        )
+        viewModel.clearUndoHint()
+        if (result == SnackbarResult.ActionPerformed) {
+            viewModel.undoLastMark()
+        }
+    }
+
+    LaunchedEffect(uiState.endOfListHint) {
+        val hint = uiState.endOfListHint ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(hint, duration = SnackbarDuration.Long)
+        viewModel.clearEndOfListHint()
+    }
+
+    LaunchedEffect(uiState.swipeFlashEpoch, uiState.swipeFlash) {
+        if (uiState.swipeFlash != null) {
+            delay(420)
+            viewModel.consumeSwipeFlash()
+        }
+    }
+
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.isFocusableInTouchMode = true
+        view.requestFocus()
+        val listener = View.OnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@OnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP -> {
+                    viewModel.goPrevious()
+                    true
+                }
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    viewModel.goNext()
+                    true
+                }
+                else -> false
+            }
+        }
+        view.setOnKeyListener(listener)
+        onDispose { view.setOnKeyListener(null) }
+    }
+
     if (uiState.showCutSheet) {
         CutTargetSheet(
             count = 1,
@@ -220,8 +278,11 @@ fun SwipeBrowseScreen(
                     ImagePage(
                         docUri = viewModel.docUriAt(page),
                         isCurrent = page == epochPager.settledPage,
+                        markGestureEnabled = uiState.swipeMarkEnabled && pagerScrollEnabled,
                         onTap = { viewModel.toggleUi() },
                         onDoubleTap = viewModel::onDoubleTap,
+                        onSwipeRight = viewModel::onHorizontalSwipeRight,
+                        onSwipeLeft = viewModel::onHorizontalSwipeLeft,
                         onZoomChanged = { zoomed ->
                             if (page == epochPager.settledPage) {
                                 pagerScrollEnabled = !zoomed
@@ -234,6 +295,12 @@ fun SwipeBrowseScreen(
             KeepBurstOverlay(
                 epoch = uiState.keepBurstEpoch,
                 kept = uiState.keepBurstKept,
+                modifier = Modifier.align(Alignment.Center),
+            )
+
+            SwipeFlashOverlay(
+                flash = uiState.swipeFlash,
+                epoch = uiState.swipeFlashEpoch,
                 modifier = Modifier.align(Alignment.Center),
             )
 
@@ -262,10 +329,12 @@ fun SwipeBrowseScreen(
                     fileName = uiState.image?.fileName.orEmpty(),
                     markStatus = uiState.markStatus,
                     keepBurstEpoch = uiState.keepBurstEpoch,
+                    canUndo = uiState.canUndo,
                     onBack = onBack,
                     onKeep = viewModel::toggleKeep,
                     onPending = viewModel::togglePending,
                     onCut = viewModel::openCutSheet,
+                    onUndo = viewModel::undoLastMark,
                 )
             }
 
@@ -274,7 +343,7 @@ fun SwipeBrowseScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = if (uiState.uiVisible) 118.dp else 24.dp),
             )
 
             val err = uiState.error
@@ -302,17 +371,22 @@ fun SwipeBrowseScreen(
 private fun ImagePage(
     docUri: String?,
     isCurrent: Boolean,
+    markGestureEnabled: Boolean,
     onTap: () -> Unit,
     onDoubleTap: () -> Unit,
+    onSwipeRight: () -> Unit,
+    onSwipeLeft: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
 ) {
     var scale by remember(isCurrent) { mutableFloatStateOf(1f) }
     var offset by remember(isCurrent) { mutableStateOf(Offset.Zero) }
+    var dragX by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(isCurrent) {
         if (!isCurrent) {
             scale = 1f
             offset = Offset.Zero
+            dragX = 0f
             onZoomChanged(false)
         }
     }
@@ -341,6 +415,8 @@ private fun ImagePage(
     }
 
     val context = LocalContext.current
+    val hapticView = LocalView.current
+    val canMarkSwipe = isCurrent && markGestureEnabled && scale <= 1.01f
 
     Box(
         modifier = Modifier
@@ -359,6 +435,46 @@ private fun ImagePage(
                 },
             )
             .then(
+                if (canMarkSwipe) {
+                    Modifier.pointerInput(canMarkSwipe) {
+                        val threshold = size.width * 0.22f
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                when {
+                                    dragX > threshold -> {
+                                        hapticView.performHapticFeedback(
+                                            if (Build.VERSION.SDK_INT >= 30) {
+                                                android.view.HapticFeedbackConstants.CONFIRM
+                                            } else {
+                                                android.view.HapticFeedbackConstants.CONTEXT_CLICK
+                                            },
+                                        )
+                                        onSwipeRight()
+                                    }
+                                    dragX < -threshold -> {
+                                        hapticView.performHapticFeedback(
+                                            if (Build.VERSION.SDK_INT >= 30) {
+                                                android.view.HapticFeedbackConstants.REJECT
+                                            } else {
+                                                android.view.HapticFeedbackConstants.LONG_PRESS
+                                            },
+                                        )
+                                        onSwipeLeft()
+                                    }
+                                }
+                                dragX = 0f
+                            },
+                            onDragCancel = { dragX = 0f },
+                            onHorizontalDrag = { _, amount ->
+                                dragX += amount
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .then(
                 if (isCurrent) {
                     Modifier.transformable(state = transformableState)
                 } else {
@@ -368,7 +484,7 @@ private fun ImagePage(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                translationX = offset.x
+                translationX = offset.x + if (canMarkSwipe) dragX * 0.35f else 0f
                 translationY = offset.y
             },
         contentAlignment = Alignment.Center,
@@ -382,6 +498,41 @@ private fun ImagePage(
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwipeFlashOverlay(
+    flash: MarkStatus?,
+    epoch: Int,
+    modifier: Modifier = Modifier,
+) {
+    if (flash == null) return
+    key(epoch) {
+        val label = when (flash) {
+            MarkStatus.KEEP -> "收藏"
+            MarkStatus.TO_DELETE, MarkStatus.UNSORTED -> "待删除"
+            MarkStatus.PENDING -> "待定"
+            MarkStatus.MOVED -> "已剪切"
+        }
+        val color = when (flash) {
+            MarkStatus.KEEP -> Color(0xFFFF2D55)
+            else -> Color(0xFFFFB020)
+        }
+        Box(
+            modifier = modifier
+                .padding(24.dp)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 22.dp, vertical = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label,
+                color = color,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
             )
         }
     }

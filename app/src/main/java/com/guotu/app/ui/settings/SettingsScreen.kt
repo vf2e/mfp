@@ -155,6 +155,13 @@ fun SettingsScreen(
                     checked = ui.showTagsTab,
                     onCheckedChange = viewModel::setShowTagsTab,
                 )
+                GuotuHairline()
+                SwitchRow(
+                    title = stringResource(R.string.settings_default_unreviewed),
+                    subtitle = stringResource(R.string.settings_default_unreviewed_hint),
+                    checked = ui.defaultUnreviewed,
+                    onCheckedChange = viewModel::setDefaultUnreviewed,
+                )
             }
         }
 
@@ -174,6 +181,22 @@ fun SettingsScreen(
                         ),
                         selected = ui.pageSize,
                         onSelect = viewModel::setPageSize,
+                    )
+                }
+                GuotuHairline()
+                FieldBlock(
+                    title = stringResource(R.string.settings_grid_columns),
+                    subtitle = stringResource(R.string.settings_grid_columns_hint),
+                ) {
+                    GuotuSegmentedRail(
+                        options = listOf(
+                            0 to stringResource(R.string.settings_grid_auto),
+                            2 to "2",
+                            3 to "3",
+                            4 to "4",
+                        ),
+                        selected = ui.gridColumns,
+                        onSelect = viewModel::setGridColumns,
                     )
                 }
             }
@@ -197,6 +220,13 @@ fun SettingsScreen(
                         onSelect = viewModel::setDoubleTapAction,
                     )
                 }
+                GuotuHairline()
+                SwitchRow(
+                    title = stringResource(R.string.settings_swipe_mark),
+                    subtitle = stringResource(R.string.settings_swipe_mark_hint),
+                    checked = ui.swipeMarkGesture,
+                    onCheckedChange = viewModel::setSwipeMarkGesture,
+                )
                 GuotuHairline()
                 SwitchRow(
                     title = stringResource(R.string.settings_swap_swipe),

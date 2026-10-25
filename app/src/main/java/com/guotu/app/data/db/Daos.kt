@@ -158,6 +158,30 @@ interface ImageDao {
     @Query("DELETE FROM image WHERE root_id = :rootId")
     suspend fun deleteByRoot(rootId: Long)
 
+    @Query("DELETE FROM image WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
+
+    @Query("SELECT * FROM image WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<Long>): List<ImageEntity>
+
+    @Query(
+        """
+        UPDATE image SET is_missing = 1
+        WHERE id IN (:ids)
+        """,
+    )
+    suspend fun markMissing(ids: List<Long>)
+
+    @Query(
+        """
+        SELECT id FROM image
+        WHERE root_id = :rootId AND is_missing = 0 AND mark_status = :status
+        ORDER BY date_modified DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun listIdsByStatus(rootId: Long, status: String, limit: Int): List<Long>
+
     @Query(
         """
         SELECT relative_path AS relativePath, mark_status AS markStatus, star AS star

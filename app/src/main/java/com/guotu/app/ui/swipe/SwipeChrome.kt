@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -96,10 +97,12 @@ fun SwipeBottomChrome(
     fileName: String,
     markStatus: MarkStatus,
     keepBurstEpoch: Int = 0,
+    canUndo: Boolean = false,
     onBack: () -> Unit,
     onKeep: () -> Unit,
     onPending: () -> Unit,
     onCut: () -> Unit,
+    onUndo: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -133,6 +136,13 @@ fun SwipeBottomChrome(
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                )
+            }
+            if (canUndo) {
+                CircularChromeButton(
+                    icon = Icons.AutoMirrored.Outlined.Undo,
+                    contentDescription = stringResource(R.string.action_undo_mark),
+                    onClick = onUndo,
                 )
             }
             MarkStatusChip(status = markStatus)

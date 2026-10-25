@@ -13,6 +13,7 @@ import com.guotu.app.data.prefs.SettingsRepository
 import com.guotu.app.data.repo.RootBrowseStateStore
 import com.guotu.app.data.repo.RootFolderRepository
 import com.guotu.app.data.repo.ImageRepository
+import com.guotu.app.data.repo.LibraryStats
 import com.guotu.app.data.db.FolderPresetDao
 import com.guotu.app.data.db.FolderPresetEntity
 import com.guotu.app.domain.model.ConflictPolicy
@@ -22,6 +23,7 @@ import com.guotu.app.domain.model.SortKey
 import com.guotu.app.domain.model.SortSpec
 import com.guotu.app.domain.usecase.MarkImageUseCase
 import com.guotu.app.player.playlist.PlaylistSession
+import com.guotu.app.work.DeleteScheduler
 import com.guotu.app.work.MoveScheduler
 import com.guotu.app.work.ScanScheduler
 import com.guotu.app.work.ScanWorker
@@ -40,6 +42,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 
@@ -77,6 +83,9 @@ data class LibraryUiState(
     val scanResultMessage: String? = null,
     val lastRelativePath: String? = null,
     val pageSize: Int = 100,
+    val gridColumns: Int = 0,
+    val stats: LibraryStats = LibraryStats(),
+    val actionMessage: String? = null,
 )
 
 @HiltViewModel
@@ -88,6 +97,7 @@ class LibraryViewModel @Inject constructor(
     private val markImageUseCase: MarkImageUseCase,
     private val playlistSession: PlaylistSession,
     private val moveScheduler: MoveScheduler,
+    private val deleteScheduler: DeleteScheduler,
     private val folderPresetDao: FolderPresetDao,
     private val filterBridge: LibraryFilterBridge,
     private val tagDao: com.guotu.app.data.db.TagDao,
@@ -120,6 +130,15 @@ class LibraryViewModel @Inject constructor(
     private val lastRelativePath = MutableStateFlow<String?>(null)
     private val pageSizeFlow = settingsRepository.pageSize
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 100)
+    private val gridColumnsFlow = settingsRepository.gridColumns
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    private val actionMessage = MutableStateFlow<String?>(null)
+    private var appliedDefaultFilter = false
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val statsFlow: Flow<LibraryStats> = rootFlow.flatMapLatest { root ->
+        if (root == null) flowOf(LibraryStats()) else imageRepository.observeStats(root.id)
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val images: Flow<PagingData<ImageEntity>> = combine(
@@ -147,6 +166,12 @@ class LibraryViewModel @Inject constructor(
     private var lastHandledScanId: UUID? = null
 
     init {
+        viewModelScope.launch {
+            if (!appliedDefaultFilter && settingsRepository.defaultUnreviewed.first()) {
+                appliedDefaultFilter = true
+                filterState.update { it.copy(quickFilter = QuickFilter.UNSORTED) }
+            }
+        }
         viewModelScope.launch {
             rootFlow.collect { root ->
                 if (root == null) {
@@ -262,32 +287,49 @@ class LibraryViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<LibraryUiState> = combine(
-        combine(rootFlow, filteredCount, scanInfoFlow) { root, count, work ->
-            Triple(root, count, work)
+        combine(rootFlow, filteredCount, scanInfoFlow, statsFlow) { root, count, work, stats ->
+            RootBundle(root, count, work, stats)
         },
-        combine(filterState, scanResultMessage, lastRelativePath, pageSizeFlow) { filter, scanMsg, last, pageSize ->
-            LibraryExtras(filter, scanMsg, last, pageSize)
+        combine(
+            combine(filterState, scanResultMessage, lastRelativePath) { filter, scanMsg, last ->
+                Triple(filter, scanMsg, last)
+            },
+            combine(pageSizeFlow, gridColumnsFlow, actionMessage) { pageSize, gridColumns, action ->
+                Triple(pageSize, gridColumns, action)
+            },
+        ) { filterTriple, pageTriple ->
+            LibraryExtras(
+                filter = filterTriple.first,
+                scanMsg = filterTriple.second,
+                lastPath = filterTriple.third,
+                pageSize = pageTriple.first,
+                gridColumns = pageTriple.second,
+                action = pageTriple.third,
+            )
         },
-    ) { rootCountWork, extras ->
-        val (root, count, work) = rootCountWork
-        val running = work?.state == WorkInfo.State.RUNNING || work?.state == WorkInfo.State.ENQUEUED
-        val found = work?.progress?.getInt(ScanWorker.KEY_FOUND, 0) ?: 0
-        val scanError = if (work?.state == WorkInfo.State.FAILED) {
-            work.outputData.getString(ScanWorker.KEY_ERROR) ?: "扫描失败"
+    ) { rootBundle, extras ->
+        val running = rootBundle.work?.state == WorkInfo.State.RUNNING ||
+            rootBundle.work?.state == WorkInfo.State.ENQUEUED
+        val found = rootBundle.work?.progress?.getInt(ScanWorker.KEY_FOUND, 0) ?: 0
+        val scanError = if (rootBundle.work?.state == WorkInfo.State.FAILED) {
+            rootBundle.work.outputData.getString(ScanWorker.KEY_ERROR) ?: "扫描失败"
         } else {
             null
         }
         extras.filter.copy(
-            hasRoot = root != null,
-            rootId = root?.id,
-            rootPath = root?.displayPath,
-            imageCount = count,
+            hasRoot = rootBundle.root != null,
+            rootId = rootBundle.root?.id,
+            rootPath = rootBundle.root?.displayPath,
+            imageCount = rootBundle.count,
             isScanning = running,
             scanFound = found,
             scanError = scanError,
             scanResultMessage = extras.scanMsg,
             lastRelativePath = extras.lastPath,
             pageSize = extras.pageSize,
+            gridColumns = extras.gridColumns,
+            stats = rootBundle.stats,
+            actionMessage = extras.action,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -295,11 +337,20 @@ class LibraryViewModel @Inject constructor(
         initialValue = LibraryUiState(),
     )
 
+    private data class RootBundle(
+        val root: com.guotu.app.data.db.RootFolderEntity?,
+        val count: Int,
+        val work: WorkInfo?,
+        val stats: LibraryStats,
+    )
+
     private data class LibraryExtras(
         val filter: LibraryUiState,
         val scanMsg: String?,
         val lastPath: String?,
         val pageSize: Int,
+        val gridColumns: Int,
+        val action: String?,
     )
 
     fun onRootSelected(uri: Uri) {
@@ -419,6 +470,80 @@ class LibraryViewModel @Inject constructor(
         scanResultMessage.value = null
     }
 
+    fun clearActionMessage() {
+        actionMessage.value = null
+    }
+
+    /** 全选当前筛选结果（最多 MAX_SELECT 张，避免 OOM）。 */
+    fun selectAllFiltered() {
+        viewModelScope.launch {
+            val rootId = rootFolderRepository.getCurrent()?.id ?: return@launch
+            val ui = filterState.value
+            val ids = imageRepository.queryIds(
+                rootId = rootId,
+                filter = ui.toFilterSpec(),
+                sort = ui.sort,
+                randomSeed = randomSeed,
+                limit = MAX_SELECT,
+            )
+            if (ids.isEmpty()) {
+                actionMessage.value = "当前筛选下没有图片"
+                return@launch
+            }
+            filterState.update {
+                it.copy(selectionMode = true, selectedIds = ids.toSet())
+            }
+            if (ids.size >= MAX_SELECT) {
+                actionMessage.value = "已选前 $MAX_SELECT 张（单次上限）"
+            }
+        }
+    }
+
+    /** 物理删除「待删除」标记的文件（最多 MAX_DELETE 张）。 */
+    fun purgeToDelete() {
+        viewModelScope.launch {
+            val rootId = rootFolderRepository.getCurrent()?.id ?: return@launch
+            val ids = imageRepository.listIdsByStatus(
+                rootId = rootId,
+                status = MarkStatus.TO_DELETE,
+                limit = MAX_DELETE,
+            )
+            if (ids.isEmpty()) {
+                actionMessage.value = "没有标记为「待删除」的图片"
+                return@launch
+            }
+            val taskId = deleteScheduler.enqueueDelete(ids)
+            actionMessage.value = "已加入删除任务 #$taskId（${ids.size} 张）"
+        }
+    }
+
+    /** 导出收藏清单到应用 Documents，并返回绝对路径。 */
+    fun exportKeepList() {
+        viewModelScope.launch {
+            val root = rootFolderRepository.getCurrent() ?: return@launch
+            val rows = imageRepository.listMarkedPaths(root.id)
+                .filter { it.markStatus == MarkStatus.KEEP.name }
+            if (rows.isEmpty()) {
+                actionMessage.value = "还没有收藏图片可导出"
+                return@launch
+            }
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val dir = File(context.getExternalFilesDir(null), "exports").apply { mkdirs() }
+            val out = File(dir, "guotu_keep_$stamp.txt")
+            out.writeText(
+                buildString {
+                    appendLine("# 过图收藏清单 · ${rows.size} 张")
+                    appendLine("# 根目录: ${root.displayPath}")
+                    appendLine("# 导出时间: $stamp")
+                    appendLine()
+                    rows.forEach { appendLine(it.relativePath) }
+                },
+                Charsets.UTF_8,
+            )
+            actionMessage.value = "已导出 ${rows.size} 张到 ${out.absolutePath}"
+        }
+    }
+
     fun enqueueCut(targetTreeUri: Uri) {
         val ids = filterState.value.selectedIds.toList()
         val policy = filterState.value.conflictPolicy
@@ -440,32 +565,50 @@ class LibraryViewModel @Inject constructor(
         enqueueCut(Uri.parse(preset.uri))
     }
 
-    /** 从第一条未标记（若无则全张第一条）进入抖音式过图。 */
+    /**
+     * 按当前筛选结果进入过图。
+     * 优先从「未整理」起步；若当前筛选本身就是未整理/待删除，则从列表第一张开始。
+     */
     suspend fun startBrowse(): Int? {
         val rootId = rootFolderRepository.getCurrent()?.id ?: return null
         val pageSize = settingsRepository.pageSize.first()
-        val unsorted = imageRepository.queryIds(
-            rootId = rootId,
-            filter = FilterSpec(markStatuses = setOf(MarkStatus.UNSORTED, MarkStatus.TO_DELETE)),
-            sort = filterState.value.sort,
-            randomSeed = randomSeed,
-            limit = 1,
-            offset = 0,
-        )
-        val startId = unsorted.firstOrNull()
-            ?: imageRepository.queryIds(
+        val ui = filterState.value
+        val filter = ui.toFilterSpec()
+        val preferUnreviewed = filter.markStatuses.isEmpty() ||
+            filter.onlyUnmarked ||
+            filter.markStatuses.any {
+                it == MarkStatus.TO_DELETE || it == MarkStatus.UNSORTED
+            }
+        val startId = if (preferUnreviewed && filter.markStatuses.isEmpty()) {
+            imageRepository.queryIds(
                 rootId = rootId,
-                filter = FilterSpec(),
-                sort = filterState.value.sort,
+                filter = filter.copy(
+                    markStatuses = setOf(MarkStatus.UNSORTED, MarkStatus.TO_DELETE),
+                ),
+                sort = ui.sort,
                 randomSeed = randomSeed,
                 limit = 1,
-                offset = 0,
             ).firstOrNull()
-            ?: return null
+                ?: imageRepository.queryIds(
+                    rootId = rootId,
+                    filter = filter,
+                    sort = ui.sort,
+                    randomSeed = randomSeed,
+                    limit = 1,
+                ).firstOrNull()
+        } else {
+            imageRepository.queryIds(
+                rootId = rootId,
+                filter = filter,
+                sort = ui.sort,
+                randomSeed = randomSeed,
+                limit = 1,
+            ).firstOrNull()
+        } ?: return null
         val result = playlistSession.open(
             rootId = rootId,
-            filter = FilterSpec(),
-            sort = filterState.value.sort,
+            filter = filter,
+            sort = ui.sort,
             startImageId = startId,
             randomSeed = randomSeed,
             pageSize = pageSize,
@@ -484,7 +627,7 @@ class LibraryViewModel @Inject constructor(
         return openSwipe(imageId)
     }
 
-    /** 选中当前筛选列表全张图片并打开剪切面板。 */
+    /** 选中当前筛选列表图片并打开剪切面板（上限 MAX_SELECT）。 */
     fun prepareCutCurrentFilter() {
         viewModelScope.launch {
             val rootId = rootFolderRepository.getCurrent()?.id ?: return@launch
@@ -494,6 +637,7 @@ class LibraryViewModel @Inject constructor(
                 filter = ui.toFilterSpec(),
                 sort = ui.sort,
                 randomSeed = randomSeed,
+                limit = MAX_SELECT,
             )
             if (ids.isEmpty()) {
                 filterState.update { it.copy(cutMessage = "当前筛选下没有可剪切的图片") }
@@ -506,12 +650,14 @@ class LibraryViewModel @Inject constructor(
                     showCutSheet = true,
                 )
             }
+            if (ids.size >= MAX_SELECT) {
+                actionMessage.value = "本批最多剪切 $MAX_SELECT 张，可分多次处理"
+            }
         }
     }
 
-    /** 一键选中全张「收藏」并打开剪切。 */
+    /** 一键选中「收藏」并打开剪切（上限 MAX_SELECT；不改动当前筛选芯片）。 */
     fun prepareCutKept() {
-        filterState.update { it.copy(quickFilter = QuickFilter.KEEP) }
         viewModelScope.launch {
             val rootId = rootFolderRepository.getCurrent()?.id ?: return@launch
             val ids = imageRepository.queryIds(
@@ -519,9 +665,10 @@ class LibraryViewModel @Inject constructor(
                 filter = FilterSpec(markStatuses = setOf(MarkStatus.KEEP)),
                 sort = filterState.value.sort,
                 randomSeed = randomSeed,
+                limit = MAX_SELECT,
             )
             if (ids.isEmpty()) {
-                filterState.update { it.copy(cutMessage = "还没有标记为「收藏」的图片") }
+                actionMessage.value = "还没有标记为「收藏」的图片"
                 return@launch
             }
             filterState.update {
@@ -529,8 +676,10 @@ class LibraryViewModel @Inject constructor(
                     selectionMode = true,
                     selectedIds = ids.toSet(),
                     showCutSheet = true,
-                    quickFilter = QuickFilter.KEEP,
                 )
+            }
+            if (ids.size >= MAX_SELECT) {
+                actionMessage.value = "本批最多剪切 $MAX_SELECT 张，可分多次处理"
             }
         }
     }
@@ -561,7 +710,7 @@ class LibraryViewModel @Inject constructor(
 private fun LibraryUiState.toFilterSpec(): FilterSpec {
     val statuses = markOverride ?: when (quickFilter) {
         QuickFilter.ALL -> emptySet()
-        // 未收藏/未待定默认即待删除；兼容旧数据 UNSORTED
+        // 未整理 = 待删除 + 旧 UNSORTED
         QuickFilter.UNSORTED -> setOf(MarkStatus.UNSORTED, MarkStatus.TO_DELETE)
         QuickFilter.KEEP -> setOf(MarkStatus.KEEP)
         QuickFilter.PENDING -> setOf(MarkStatus.PENDING)
@@ -578,3 +727,6 @@ private fun LibraryUiState.toFilterSpec(): FilterSpec {
         queryText = queryText.trim().takeIf { it.isNotEmpty() },
     )
 }
+
+private const val MAX_SELECT = 500
+private const val MAX_DELETE = 2_000

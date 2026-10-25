@@ -34,6 +34,9 @@ class SettingsRepository @Inject constructor(
         val playerPrefer = stringPreferencesKey("player_prefer")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
         val showTagsTab = booleanPreferencesKey("show_tags_tab")
+        val gridColumns = intPreferencesKey("grid_columns")
+        val swipeMarkGesture = booleanPreferencesKey("swipe_mark_gesture")
+        val defaultUnreviewed = booleanPreferencesKey("default_unreviewed")
     }
 
     val preloadCount: Flow<Int> = context.settingsDataStore.data.map {
@@ -45,12 +48,28 @@ class SettingsRepository @Inject constructor(
         (it[Keys.pageSize] ?: 100).coerceIn(20, 500)
     }
 
+    /** 过图场景默认开启：标记后自动下一张。 */
     val markAutoNext: Flow<Boolean> = context.settingsDataStore.data.map {
-        it[Keys.markAutoNext] ?: false
+        it[Keys.markAutoNext] ?: true
     }
 
     val swapSwipe: Flow<Boolean> = context.settingsDataStore.data.map {
         it[Keys.swapSwipe] ?: false
+    }
+
+    /** 图库网格列数，2–4，默认自适应用 0。 */
+    val gridColumns: Flow<Int> = context.settingsDataStore.data.map {
+        (it[Keys.gridColumns] ?: 0).coerceIn(0, 4)
+    }
+
+    /** 过图页左右滑标记：右=收藏、左=待删除。默认开。 */
+    val swipeMarkGesture: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[Keys.swipeMarkGesture] ?: true
+    }
+
+    /** 首次进入图库默认「未整理」筛选。 */
+    val defaultUnreviewed: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[Keys.defaultUnreviewed] ?: true
     }
 
     /** 底栏「标签」页，默认关闭。 */
@@ -111,5 +130,17 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setShowTagsTab(enabled: Boolean) {
         context.settingsDataStore.edit { it[Keys.showTagsTab] = enabled }
+    }
+
+    suspend fun setGridColumns(columns: Int) {
+        context.settingsDataStore.edit { it[Keys.gridColumns] = columns.coerceIn(0, 4) }
+    }
+
+    suspend fun setSwipeMarkGesture(enabled: Boolean) {
+        context.settingsDataStore.edit { it[Keys.swipeMarkGesture] = enabled }
+    }
+
+    suspend fun setDefaultUnreviewed(enabled: Boolean) {
+        context.settingsDataStore.edit { it[Keys.defaultUnreviewed] = enabled }
     }
 }

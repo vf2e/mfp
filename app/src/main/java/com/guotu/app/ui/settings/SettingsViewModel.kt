@@ -20,8 +20,11 @@ data class SettingsUiState(
     val imageCount: Int = 0,
     val lastScannedAt: Long = 0L,
     val pageSize: Int = 100,
-    val markAutoNext: Boolean = false,
+    val gridColumns: Int = 0,
+    val markAutoNext: Boolean = true,
     val swapSwipe: Boolean = false,
+    val swipeMarkGesture: Boolean = true,
+    val defaultUnreviewed: Boolean = true,
     val showTagsTab: Boolean = false,
     val doubleTapAction: DoubleTapAction = DoubleTapAction.KEEP,
 )
@@ -36,25 +39,37 @@ class SettingsViewModel @Inject constructor(
     private val gesturePrefs = combine(
         settingsRepository.markAutoNext,
         settingsRepository.swapSwipe,
+        settingsRepository.swipeMarkGesture,
         settingsRepository.doubleTapAction,
+    ) { autoNext, swap, swipeMark, doubleTap ->
+        GesturePrefs(autoNext, swap, swipeMark, doubleTap)
+    }
+
+    private val libraryPrefs = combine(
+        settingsRepository.pageSize,
+        settingsRepository.gridColumns,
+        settingsRepository.defaultUnreviewed,
         settingsRepository.showTagsTab,
-    ) { autoNext, swap, doubleTap, showTags ->
-        GesturePrefs(autoNext, swap, doubleTap, showTags)
+    ) { pageSize, gridColumns, defaultUnreviewed, showTags ->
+        LibraryPrefs(pageSize, gridColumns, defaultUnreviewed, showTags)
     }
 
     val uiState: StateFlow<SettingsUiState> = combine(
         rootFolderRepository.observeCurrent(),
-        settingsRepository.pageSize,
+        libraryPrefs,
         gesturePrefs,
-    ) { root, pageSize, gesture ->
+    ) { root, library, gesture ->
         SettingsUiState(
             rootPath = root?.displayPath,
             imageCount = root?.imageCount ?: 0,
             lastScannedAt = root?.lastScannedAt ?: 0L,
-            pageSize = pageSize,
+            pageSize = library.pageSize,
+            gridColumns = library.gridColumns,
             markAutoNext = gesture.markAutoNext,
             swapSwipe = gesture.swapSwipe,
-            showTagsTab = gesture.showTagsTab,
+            swipeMarkGesture = gesture.swipeMark,
+            defaultUnreviewed = library.defaultUnreviewed,
+            showTagsTab = library.showTags,
             doubleTapAction = gesture.doubleTap,
         )
     }.stateIn(
@@ -83,12 +98,24 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setPageSize(size) }
     }
 
+    fun setGridColumns(columns: Int) {
+        viewModelScope.launch { settingsRepository.setGridColumns(columns) }
+    }
+
     fun setMarkAutoNext(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setMarkAutoNext(enabled) }
     }
 
     fun setSwapSwipe(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setSwapSwipe(enabled) }
+    }
+
+    fun setSwipeMarkGesture(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setSwipeMarkGesture(enabled) }
+    }
+
+    fun setDefaultUnreviewed(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setDefaultUnreviewed(enabled) }
     }
 
     fun setDoubleTapAction(action: DoubleTapAction) {
@@ -103,6 +130,13 @@ class SettingsViewModel @Inject constructor(
 private data class GesturePrefs(
     val markAutoNext: Boolean,
     val swapSwipe: Boolean,
+    val swipeMark: Boolean,
     val doubleTap: DoubleTapAction,
-    val showTagsTab: Boolean,
+)
+
+private data class LibraryPrefs(
+    val pageSize: Int,
+    val gridColumns: Int,
+    val defaultUnreviewed: Boolean,
+    val showTags: Boolean,
 )

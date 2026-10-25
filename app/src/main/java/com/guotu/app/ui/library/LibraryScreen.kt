@@ -32,7 +32,10 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -97,6 +101,7 @@ fun LibraryScreen(
     val scope = rememberCoroutineScope()
     var showSearch by remember { mutableStateOf(false) }
     var showTagPicker by remember { mutableStateOf(false) }
+    var showPurgeConfirm by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val context = LocalContext.current
@@ -135,10 +140,39 @@ fun LibraryScreen(
         )
     }
 
+    if (showPurgeConfirm) {
+        val count = uiState.stats.toDelete.coerceAtMost(2000)
+        AlertDialog(
+            onDismissRequest = { showPurgeConfirm = false },
+            title = { Text(stringResource(R.string.purge_confirm_title)) },
+            text = { Text(stringResource(R.string.purge_confirm_body, count)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPurgeConfirm = false
+                        viewModel.purgeToDelete()
+                    },
+                ) {
+                    Text(stringResource(R.string.purge_confirm_ok), color = GuotuColors.Danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPurgeConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
     LaunchedEffect(uiState.cutMessage) {
         val msg = uiState.cutMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(msg)
         viewModel.clearCutMessage()
+    }
+    LaunchedEffect(uiState.actionMessage) {
+        val msg = uiState.actionMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(msg)
+        viewModel.clearActionMessage()
     }
 
     LaunchedEffect(uiState.scanResultMessage) {
@@ -184,6 +218,7 @@ fun LibraryScreen(
                 SelectionBar(
                     count = uiState.selectedIds.size,
                     canTag = showTagsFeatures && tags.isNotEmpty(),
+                    onSelectAll = viewModel::selectAllFiltered,
                     onCut = viewModel::openCutSheet,
                     onKeep = { viewModel.markSelected(MarkStatus.KEEP) },
                     onDelete = { viewModel.markSelected(MarkStatus.TO_DELETE) },
@@ -249,6 +284,10 @@ fun LibraryScreen(
                 },
                 onSetSort = viewModel::setSort,
                 onCutKept = viewModel::prepareCutKept,
+                onCutFiltered = viewModel::prepareCutCurrentFilter,
+                onPurgeToDelete = { showPurgeConfirm = true },
+                onExportKeep = viewModel::exportKeepList,
+                browsingEnabled = !uiState.isScanning,
                 onOpenItem = { imageId ->
                     scope.launch {
                         val start = viewModel.openSwipe(imageId) ?: return@launch
@@ -333,6 +372,7 @@ private fun LibraryBrandHeader(
 private fun SelectionBar(
     count: Int,
     canTag: Boolean,
+    onSelectAll: () -> Unit,
     onCut: () -> Unit,
     onKeep: () -> Unit,
     onDelete: () -> Unit,
@@ -364,6 +404,14 @@ private fun SelectionBar(
                 modifier = Modifier.padding(start = GuotuDimens.Grid),
             )
             Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = stringResource(R.string.action_select_all),
+                modifier = Modifier
+                    .clickable(onClick = onSelectAll)
+                    .padding(horizontal = GuotuDimens.ListGap, vertical = 10.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = GuotuColors.Ink,
+            )
             Text(
                 text = stringResource(R.string.action_cut),
                 modifier = Modifier
@@ -427,9 +475,16 @@ private fun LibraryContent(
     onResumeLast: () -> Unit,
     onSetSort: (SortKey) -> Unit,
     onCutKept: () -> Unit,
+    onCutFiltered: () -> Unit,
+    onPurgeToDelete: () -> Unit,
+    onExportKeep: () -> Unit,
+    browsingEnabled: Boolean,
     onOpenItem: (Long) -> Unit,
 ) {
     Column(modifier = modifier) {
+        if (uiState.stats.total > 0) {
+            ProgressStatsBar(stats = uiState.stats, filtered = uiState.imageCount)
+        }
         QuickFilterRow(current = uiState.quickFilter, onSelect = onQuickFilter)
         SortRow(sort = uiState.sort, onSelect = onSetSort)
 
@@ -465,9 +520,15 @@ private fun LibraryContent(
         if (uiState.imageCount > 0 || images.itemCount > 0) {
             BrowseActionRow(
                 hasLast = !uiState.lastRelativePath.isNullOrBlank(),
+                toDeleteCount = uiState.stats.toDelete,
+                keepCount = uiState.stats.keep,
+                browsingEnabled = browsingEnabled,
                 onStartBrowse = onStartBrowse,
                 onResumeLast = onResumeLast,
                 onCutKept = onCutKept,
+                onCutFiltered = onCutFiltered,
+                onPurgeToDelete = onPurgeToDelete,
+                onExportKeep = onExportKeep,
             )
         }
 
@@ -485,12 +546,7 @@ private fun LibraryContent(
         }
 
         if (uiState.isScanning) {
-            Text(
-                text = stringResource(R.string.scanning_progress, uiState.scanFound),
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = GuotuColors.Signal,
-            )
+            ScanBanner(found = uiState.scanFound)
         }
 
         uiState.scanError?.let { err ->
@@ -531,7 +587,10 @@ private fun LibraryContent(
             }
             else -> {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(148.dp),
+                    columns = when (uiState.gridColumns) {
+                        2, 3, 4 -> GridCells.Fixed(uiState.gridColumns)
+                        else -> GridCells.Adaptive(148.dp)
+                    },
                     contentPadding = PaddingValues(
                         horizontal = GuotuDimens.Page,
                         vertical = GuotuDimens.Grid,
@@ -614,68 +673,64 @@ private fun SortRow(
 }
 
 @Composable
-private fun BrowseActionRow(
-    hasLast: Boolean,
-    onStartBrowse: () -> Unit,
-    onResumeLast: () -> Unit,
-    onCutKept: () -> Unit,
+private fun ProgressStatsBar(
+    stats: com.guotu.app.data.repo.LibraryStats,
+    filtered: Int,
 ) {
+    val done = stats.progressDone
+    val total = stats.total.coerceAtLeast(1)
+    val ratio = (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(GuotuColors.Panel)
             .padding(horizontal = GuotuDimens.Page, vertical = GuotuDimens.Grid),
-        verticalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(GuotuDimens.ListGap)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
             Text(
-                text = stringResource(R.string.action_start_browse),
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(GuotuButtonShape)
-                    .background(GuotuColors.Signal)
-                    .clickable(onClick = onStartBrowse)
-                    .padding(vertical = 12.dp),
+                text = stringResource(R.string.stats_progress, done, stats.total),
                 style = MaterialTheme.typography.labelLarge,
-                color = GuotuColors.OnSignal,
+                color = GuotuColors.Ink,
                 fontWeight = FontWeight.SemiBold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
-            if (hasLast) {
-                Text(
-                    text = stringResource(R.string.action_resume_last),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(GuotuButtonShape)
-                        .border(GuotuDimens.Hairline, GuotuColors.Signal, GuotuButtonShape)
-                        .clickable(onClick = onResumeLast)
-                        .padding(vertical = 12.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = GuotuColors.Signal,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-            }
+            Text(
+                text = stringResource(R.string.stats_filtered, filtered),
+                style = MaterialTheme.typography.labelMedium,
+                color = GuotuColors.InkMute,
+            )
         }
-        Text(
-            text = stringResource(R.string.action_cut_kept),
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(6.dp)
                 .clip(GuotuButtonShape)
-                .border(GuotuDimens.Hairline, GuotuColors.Rule, GuotuButtonShape)
-                .clickable(onClick = onCutKept)
-                .padding(vertical = 12.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = GuotuColors.Ink,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                .background(GuotuColors.Rule),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(ratio)
+                    .height(6.dp)
+                    .clip(GuotuButtonShape)
+                    .background(GuotuColors.Signal),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(
+                R.string.stats_breakdown,
+                stats.keep,
+                stats.pending,
+                stats.toDelete,
+                stats.moved,
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = GuotuColors.InkMute,
         )
     }
-    Text(
-        text = stringResource(R.string.browse_hint),
-        modifier = Modifier.padding(horizontal = GuotuDimens.Page, vertical = 4.dp),
-        style = MaterialTheme.typography.bodySmall,
-        color = GuotuColors.InkMute,
-    )
 }
 
 @Composable
@@ -743,6 +798,7 @@ private fun QuickFilterRow(
         ) {
             val filters = listOf(
                 QuickFilter.ALL to R.string.filter_all,
+                QuickFilter.UNSORTED to R.string.filter_unreviewed,
                 QuickFilter.KEEP to R.string.mark_keep,
                 QuickFilter.PENDING to R.string.mark_pending,
                 QuickFilter.TO_DELETE to R.string.mark_to_delete,

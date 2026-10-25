@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.ArrayDeque
 import javax.inject.Inject
 
 data class SwipeUiState(
@@ -38,7 +39,6 @@ data class SwipeUiState(
     val pageIndex: Int = 0,
     val pageCount: Int = 0,
     val totalInLibrary: Int = 0,
-    /** 换页时递增，强制重建 Pager。 */
     val playlistEpoch: Int = 0,
     val image: ImageEntity? = null,
     val uiVisible: Boolean = true,
@@ -47,11 +47,24 @@ data class SwipeUiState(
     val showCutSheet: Boolean = false,
     val conflictPolicy: ConflictPolicy = ConflictPolicy.RENAME,
     val cutMessage: String? = null,
-    /** One-shot: UI scrolls pager then clears. */
     val pendingScrollIndex: Int? = null,
-    /** 收藏/取消特效：epoch 递增触发一次动画；kept=是否变为收藏。 */
     val keepBurstEpoch: Int = 0,
     val keepBurstKept: Boolean = false,
+    /** 左右滑标记反馈：KEEP / TO_DELETE，短暂展示。 */
+    val swipeFlash: MarkStatus? = null,
+    val swipeFlashEpoch: Int = 0,
+    val canUndo: Boolean = false,
+    val undoHint: String? = null,
+    val swipeMarkEnabled: Boolean = true,
+    /** true = 左滑收藏 / 右滑待删（对调）。 */
+    val swapSwipeMark: Boolean = false,
+    val endOfListHint: String? = null,
+)
+
+private data class UndoEntry(
+    val imageId: Long,
+    val previous: MarkStatus,
+    val applied: MarkStatus,
 )
 
 @HiltViewModel
@@ -81,8 +94,19 @@ class SwipeBrowseViewModel @Inject constructor(
 
     private val docUriByPage = mutableMapOf<Int, String>()
     private var observeJob: Job? = null
+    private val undoStack = ArrayDeque<UndoEntry>(16)
 
     init {
+        viewModelScope.launch {
+            settingsRepository.swipeMarkGesture.collect { enabled ->
+                _uiState.update { it.copy(swipeMarkEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.swapSwipe.collect { swap ->
+                _uiState.update { it.copy(swapSwipeMark = swap) }
+            }
+        }
         val snap = playlistSession.current()
         if (snap == null || snap.ids.isEmpty()) {
             _uiState.update { it.copy(error = "浏览列表为空") }
@@ -161,8 +185,7 @@ class SwipeBrowseViewModel @Inject constructor(
     private fun persistBrowseCursor(image: ImageEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             val root = rootFolderRepository.getCurrent() ?: return@launch
-            val treeUri = Uri.parse(root.treeUri)
-            browseStateStore.updateLast(treeUri, image.relativePath)
+            browseStateStore.updateLast(Uri.parse(root.treeUri), image.relativePath)
         }
     }
 
@@ -170,25 +193,16 @@ class SwipeBrowseViewModel @Inject constructor(
         _uiState.update { it.copy(uiVisible = !it.uiVisible) }
     }
 
-    fun showUi() {
-        _uiState.update { it.copy(uiVisible = true) }
-    }
-
-    fun hideUi() {
-        _uiState.update { it.copy(uiVisible = false) }
-    }
-
     fun onDoubleTap() {
         viewModelScope.launch {
             when (val action = settingsRepository.doubleTapAction.first()) {
                 DoubleTapAction.KEEP, DoubleTapAction.TOGGLE_PLAY -> toggleKeep()
                 DoubleTapAction.PENDING -> togglePending()
-                DoubleTapAction.TO_DELETE -> setStatus(MarkStatus.TO_DELETE)
+                DoubleTapAction.TO_DELETE -> applyMark(MarkStatus.TO_DELETE, flash = true, forceNext = true)
             }
         }
     }
 
-    /** 收藏：点亮=收藏；再点取消 → 待删除。 */
     fun toggleKeep() {
         val current = _uiState.value.markStatus
         val next = if (current == MarkStatus.KEEP) MarkStatus.TO_DELETE else MarkStatus.KEEP
@@ -200,25 +214,109 @@ class SwipeBrowseViewModel @Inject constructor(
                 uiVisible = true,
             )
         }
-        setStatus(next)
+        applyMark(next, flash = next == MarkStatus.KEEP, forceNext = next == MarkStatus.KEEP)
     }
 
-    /** 待定：点亮=待定；再点取消 → 待删除。 */
     fun togglePending() {
         val current = _uiState.value.markStatus
         val next = if (current == MarkStatus.PENDING) MarkStatus.TO_DELETE else MarkStatus.PENDING
-        setStatus(next)
+        applyMark(next, flash = false, forceNext = next == MarkStatus.PENDING)
     }
 
-    fun setStatus(status: MarkStatus) {
+    /** 水平右滑（默认收藏；开启对调后为待删）。 */
+    fun onHorizontalSwipeRight() {
+        if (!_uiState.value.swipeMarkEnabled) return
+        if (_uiState.value.swapSwipeMark) markRejectAndAdvance() else markKeepAndAdvance()
+    }
+
+    /** 水平左滑（默认待删；开启对调后为收藏）。 */
+    fun onHorizontalSwipeLeft() {
+        if (!_uiState.value.swipeMarkEnabled) return
+        if (_uiState.value.swapSwipeMark) markKeepAndAdvance() else markRejectAndAdvance()
+    }
+
+    private fun markKeepAndAdvance() {
+        _uiState.update {
+            it.copy(
+                keepBurstEpoch = it.keepBurstEpoch + 1,
+                keepBurstKept = true,
+                swipeFlash = MarkStatus.KEEP,
+                swipeFlashEpoch = it.swipeFlashEpoch + 1,
+                uiVisible = true,
+            )
+        }
+        applyMark(MarkStatus.KEEP, flash = false, forceNext = true)
+    }
+
+    private fun markRejectAndAdvance() {
+        _uiState.update {
+            it.copy(
+                swipeFlash = MarkStatus.TO_DELETE,
+                swipeFlashEpoch = it.swipeFlashEpoch + 1,
+                uiVisible = true,
+            )
+        }
+        applyMark(MarkStatus.TO_DELETE, flash = false, forceNext = true)
+    }
+
+    fun consumeSwipeFlash() {
+        _uiState.update { it.copy(swipeFlash = null) }
+    }
+
+    fun clearEndOfListHint() {
+        _uiState.update { it.copy(endOfListHint = null) }
+    }
+
+    fun undoLastMark() {
+        val entry = synchronized(undoStack) {
+            if (undoStack.isEmpty()) null else undoStack.removeLast()
+        } ?: return
+        viewModelScope.launch {
+            markImageUseCase.setStatus(listOf(entry.imageId), entry.previous)
+            markImageUseCase.setStar(
+                listOf(entry.imageId),
+                if (entry.previous == MarkStatus.KEEP) 1 else 0,
+            )
+            val root = rootFolderRepository.getCurrent()
+            val image = imageRepository.getById(entry.imageId)
+            if (root != null && image != null) {
+                withContext(Dispatchers.IO) {
+                    browseStateStore.upsertMark(
+                        Uri.parse(root.treeUri),
+                        image.relativePath,
+                        entry.previous,
+                    )
+                }
+            }
+            val current = _uiState.value.image
+            _uiState.update {
+                it.copy(
+                    canUndo = undoStack.isNotEmpty(),
+                    undoHint = "已撤销「${statusLabel(entry.applied)}」",
+                    markStatus = if (current?.id == entry.imageId) entry.previous else it.markStatus,
+                    image = if (current?.id == entry.imageId) {
+                        current.copy(markStatus = entry.previous.name)
+                    } else {
+                        it.image
+                    },
+                )
+            }
+        }
+    }
+
+    fun clearUndoHint() {
+        _uiState.update { it.copy(undoHint = null) }
+    }
+
+    private fun applyMark(status: MarkStatus, flash: Boolean, forceNext: Boolean) {
         val image = _uiState.value.image ?: return
+        val previous = _uiState.value.markStatus
         viewModelScope.launch {
             markImageUseCase.setStatus(listOf(image.id), status)
-            if (status == MarkStatus.KEEP) {
-                markImageUseCase.setStar(listOf(image.id), 1)
-            } else {
-                markImageUseCase.setStar(listOf(image.id), 0)
-            }
+            markImageUseCase.setStar(
+                listOf(image.id),
+                if (status == MarkStatus.KEEP) 1 else 0,
+            )
             val root = rootFolderRepository.getCurrent()
             if (root != null && (status == MarkStatus.KEEP || status == MarkStatus.PENDING)) {
                 withContext(Dispatchers.IO) {
@@ -228,15 +326,32 @@ class SwipeBrowseViewModel @Inject constructor(
                         status,
                     )
                 }
+            } else if (root != null) {
+                withContext(Dispatchers.IO) {
+                    browseStateStore.upsertMark(
+                        Uri.parse(root.treeUri),
+                        image.relativePath,
+                        status,
+                    )
+                }
+            }
+            if (previous != status) {
+                synchronized(undoStack) {
+                    undoStack.addLast(UndoEntry(image.id, previous, status))
+                    while (undoStack.size > 30) undoStack.removeFirst()
+                }
             }
             val updated = imageRepository.getById(image.id)
             var pendingScroll: Int? = null
             var jumpNextPage = false
-            if (settingsRepository.markAutoNext.first()) {
+            val autoNext = forceNext || settingsRepository.markAutoNext.first()
+            var reachedEnd = false
+            if (autoNext) {
                 val idx = _uiState.value.currentIndex
                 when {
                     idx + 1 < _uiState.value.total -> pendingScroll = idx + 1
                     playlistSession.current()?.hasNextPage == true -> jumpNextPage = true
+                    else -> reachedEnd = true
                 }
             }
             _uiState.update {
@@ -244,10 +359,18 @@ class SwipeBrowseViewModel @Inject constructor(
                     image = updated,
                     markStatus = status,
                     pendingScrollIndex = pendingScroll ?: it.pendingScrollIndex,
+                    canUndo = undoStack.isNotEmpty(),
+                    swipeFlash = if (flash) status else it.swipeFlash,
+                    swipeFlashEpoch = if (flash) it.swipeFlashEpoch + 1 else it.swipeFlashEpoch,
+                    endOfListHint = if (reachedEnd) "本批已过完，可返回图库继续整理" else it.endOfListHint,
                 )
             }
             if (jumpNextPage) goNext()
         }
+    }
+
+    fun setStatus(status: MarkStatus) {
+        applyMark(status, flash = false, forceNext = false)
     }
 
     fun goPrevious() {
@@ -349,5 +472,12 @@ class SwipeBrowseViewModel @Inject constructor(
     override fun onCleared() {
         observeJob?.cancel()
         super.onCleared()
+    }
+
+    private fun statusLabel(status: MarkStatus): String = when (status) {
+        MarkStatus.KEEP -> "收藏"
+        MarkStatus.PENDING -> "待定"
+        MarkStatus.TO_DELETE, MarkStatus.UNSORTED -> "待删除"
+        MarkStatus.MOVED -> "已剪切"
     }
 }
