@@ -21,7 +21,7 @@ data class SettingsUiState(
     val lastScannedAt: Long = 0L,
     val pageSize: Int = 100,
     val gridColumns: Int = 0,
-    val markAutoNext: Boolean = true,
+    val markAutoNext: Boolean = false,
     val swapSwipe: Boolean = false,
     val swipeMarkGesture: Boolean = true,
     val defaultUnreviewed: Boolean = true,

@@ -50,7 +50,7 @@ class SettingsRepository @Inject constructor(
 
     /** 过图场景默认开启：标记后自动下一张。 */
     val markAutoNext: Flow<Boolean> = context.settingsDataStore.data.map {
-        it[Keys.markAutoNext] ?: true
+        it[Keys.markAutoNext] ?: false
     }
 
     val swapSwipe: Flow<Boolean> = context.settingsDataStore.data.map {

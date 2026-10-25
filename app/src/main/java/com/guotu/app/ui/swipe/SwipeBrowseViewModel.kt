@@ -225,7 +225,7 @@ class SwipeBrowseViewModel @Inject constructor(
             when (val action = settingsRepository.doubleTapAction.first()) {
                 DoubleTapAction.KEEP, DoubleTapAction.TOGGLE_PLAY -> toggleKeep()
                 DoubleTapAction.PENDING -> togglePending()
-                DoubleTapAction.TO_DELETE -> applyMark(MarkStatus.TO_DELETE, flash = true, forceNext = true)
+                DoubleTapAction.TO_DELETE -> applyMark(MarkStatus.TO_DELETE, flash = true)
             }
         }
     }
@@ -241,28 +241,28 @@ class SwipeBrowseViewModel @Inject constructor(
                 uiVisible = true,
             )
         }
-        applyMark(next, flash = next == MarkStatus.KEEP, forceNext = next == MarkStatus.KEEP)
+        applyMark(next, flash = next == MarkStatus.KEEP)
     }
 
     fun togglePending() {
         val current = _uiState.value.markStatus
         val next = if (current == MarkStatus.PENDING) MarkStatus.TO_DELETE else MarkStatus.PENDING
-        applyMark(next, flash = false, forceNext = next == MarkStatus.PENDING)
+        applyMark(next, flash = false)
     }
 
-    /** 水平右滑（默认收藏；开启对调后为待删）。 */
+    /** 上滑/右滑标记入口（默认收藏；开启对调后为待删）。 */
     fun onHorizontalSwipeRight() {
         if (!_uiState.value.swipeMarkEnabled) return
-        if (_uiState.value.swapSwipeMark) markRejectAndAdvance() else markKeepAndAdvance()
+        if (_uiState.value.swapSwipeMark) markReject() else markKeep()
     }
 
-    /** 水平左滑（默认待删；开启对调后为收藏）。 */
+    /** 下滑/左滑标记入口（默认待删；开启对调后为收藏）。 */
     fun onHorizontalSwipeLeft() {
         if (!_uiState.value.swipeMarkEnabled) return
-        if (_uiState.value.swapSwipeMark) markKeepAndAdvance() else markRejectAndAdvance()
+        if (_uiState.value.swapSwipeMark) markKeep() else markReject()
     }
 
-    private fun markKeepAndAdvance() {
+    private fun markKeep() {
         _uiState.update {
             it.copy(
                 keepBurstEpoch = it.keepBurstEpoch + 1,
@@ -272,10 +272,10 @@ class SwipeBrowseViewModel @Inject constructor(
                 uiVisible = true,
             )
         }
-        applyMark(MarkStatus.KEEP, flash = false, forceNext = true)
+        applyMark(MarkStatus.KEEP, flash = false)
     }
 
-    private fun markRejectAndAdvance() {
+    private fun markReject() {
         _uiState.update {
             it.copy(
                 swipeFlash = MarkStatus.TO_DELETE,
@@ -283,7 +283,7 @@ class SwipeBrowseViewModel @Inject constructor(
                 uiVisible = true,
             )
         }
-        applyMark(MarkStatus.TO_DELETE, flash = false, forceNext = true)
+        applyMark(MarkStatus.TO_DELETE, flash = false)
     }
 
     fun consumeSwipeFlash() {
@@ -335,7 +335,7 @@ class SwipeBrowseViewModel @Inject constructor(
         _uiState.update { it.copy(undoHint = null) }
     }
 
-    private fun applyMark(status: MarkStatus, flash: Boolean, forceNext: Boolean) {
+    private fun applyMark(status: MarkStatus, flash: Boolean) {
         val image = _uiState.value.image ?: return
         val previous = _uiState.value.markStatus
         viewModelScope.launch {
@@ -345,15 +345,7 @@ class SwipeBrowseViewModel @Inject constructor(
                 if (status == MarkStatus.KEEP) 1 else 0,
             )
             val root = rootFolderRepository.getCurrent()
-            if (root != null && (status == MarkStatus.KEEP || status == MarkStatus.PENDING)) {
-                withContext(Dispatchers.IO) {
-                    browseStateStore.upsertMark(
-                        Uri.parse(root.treeUri),
-                        image.relativePath,
-                        status,
-                    )
-                }
-            } else if (root != null) {
+            if (root != null) {
                 withContext(Dispatchers.IO) {
                     browseStateStore.upsertMark(
                         Uri.parse(root.treeUri),
@@ -371,7 +363,8 @@ class SwipeBrowseViewModel @Inject constructor(
             val updated = imageRepository.getById(image.id)
             var pendingScroll: Int? = null
             var jumpNextPage = false
-            val autoNext = forceNext || settingsRepository.markAutoNext.first()
+            // 仅当设置开启「标记后自动下一张」时才跳转
+            val autoNext = settingsRepository.markAutoNext.first()
             var reachedEnd = false
             if (autoNext) {
                 val idx = _uiState.value.currentIndex
@@ -397,7 +390,7 @@ class SwipeBrowseViewModel @Inject constructor(
     }
 
     fun setStatus(status: MarkStatus) {
-        applyMark(status, flash = false, forceNext = false)
+        applyMark(status, flash = false)
     }
 
     fun goPrevious() {

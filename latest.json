@@ -1,7 +1,7 @@
 {
-  "versionCode": 5,
-  "versionName": "1.2.2",
-  "apkFileName": "guotu-1.2.2-debug.apk",
-  "notes": "看图左右滑翻页；新图标；检查更新先查再更并显示下载进度",
+  "versionCode": 6,
+  "versionName": "1.2.3",
+  "apkFileName": "guotu-1.2.3-debug.apk",
+  "notes": "标记后默认不跳下一张（可在设置开启「标记后自动下一张」）",
   "minSupportedCode": 1
 }
