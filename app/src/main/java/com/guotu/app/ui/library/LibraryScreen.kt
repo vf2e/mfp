@@ -316,20 +316,19 @@ private fun LibraryBrandHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = GuotuDimens.Page, end = GuotuDimens.Grid, top = GuotuDimens.Page, bottom = GuotuDimens.ListGap),
+                .padding(start = GuotuDimens.Page, end = 2.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     color = GuotuColors.Slate,
                     fontWeight = FontWeight.Bold,
                 )
-                Spacer(modifier = Modifier.height(GuotuDimens.Grid))
                 Text(
                     text = rootPath ?: stringResource(R.string.root_path_unset),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = GuotuColors.InkMute,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -492,7 +491,7 @@ private fun LibraryContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = GuotuDimens.Page, vertical = GuotuDimens.Grid),
+                    .padding(horizontal = GuotuDimens.Page, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -500,8 +499,8 @@ private fun LibraryContent(
                     modifier = Modifier
                         .clip(GuotuButtonShape)
                         .background(GuotuColors.SignalSoft)
-                        .padding(horizontal = GuotuDimens.ListGap, vertical = GuotuDimens.Grid),
-                    style = MaterialTheme.typography.labelLarge,
+                        .padding(horizontal = GuotuDimens.ListGap, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
                     color = GuotuColors.Signal,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -511,7 +510,7 @@ private fun LibraryContent(
                     modifier = Modifier
                         .clickable(onClick = onClearExternalFilter)
                         .padding(GuotuDimens.Grid),
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     color = GuotuColors.InkMute,
                 )
             }
@@ -552,18 +551,11 @@ private fun LibraryContent(
         uiState.scanError?.let { err ->
             Text(
                 text = stringResource(R.string.scan_failed, err),
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = GuotuDimens.Page, vertical = 4.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = GuotuColors.Danger,
             )
         }
-
-        Text(
-            text = stringResource(R.string.image_count, uiState.imageCount),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = GuotuColors.InkMute,
-        )
 
         val showLoading = uiState.isScanning && images.itemCount == 0
         val showEmpty = !showLoading &&
@@ -589,14 +581,14 @@ private fun LibraryContent(
                 LazyVerticalGrid(
                     columns = when (uiState.gridColumns) {
                         2, 3, 4 -> GridCells.Fixed(uiState.gridColumns)
-                        else -> GridCells.Adaptive(148.dp)
+                        else -> GridCells.Adaptive(120.dp)
                     },
                     contentPadding = PaddingValues(
                         horizontal = GuotuDimens.Page,
                         vertical = GuotuDimens.Grid,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(GuotuDimens.ListGap),
-                    horizontalArrangement = Arrangement.spacedBy(GuotuDimens.ListGap),
+                    verticalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
+                    horizontalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
                     modifier = Modifier.weight(1f),
                 ) {
                     items(
@@ -635,7 +627,7 @@ private fun SortRow(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = GuotuDimens.Page, vertical = GuotuDimens.Grid),
+            .padding(horizontal = GuotuDimens.Page, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -663,8 +655,8 @@ private fun SortRow(
                     .clip(GuotuButtonShape)
                     .background(if (selected) GuotuColors.SignalSoft else Color.Transparent)
                     .clickable { onSelect(key) }
-                    .padding(horizontal = GuotuDimens.ListGap, vertical = GuotuDimens.Grid),
-                style = MaterialTheme.typography.labelLarge,
+                    .padding(horizontal = GuotuDimens.ListGap, vertical = 4.dp),
+                style = MaterialTheme.typography.labelMedium,
                 color = if (selected) GuotuColors.Signal else GuotuColors.InkMute,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             )
@@ -684,52 +676,42 @@ private fun ProgressStatsBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(GuotuColors.Panel)
-            .padding(horizontal = GuotuDimens.Page, vertical = GuotuDimens.Grid),
+            .padding(horizontal = GuotuDimens.Page, vertical = 6.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(GuotuDimens.ListGap),
         ) {
             Text(
                 text = stringResource(R.string.stats_progress, done, stats.total),
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 color = GuotuColors.Ink,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
             )
-            Text(
-                text = stringResource(R.string.stats_filtered, filtered),
-                style = MaterialTheme.typography.labelMedium,
-                color = GuotuColors.InkMute,
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(GuotuButtonShape)
-                .background(GuotuColors.Rule),
-        ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(ratio)
-                    .height(6.dp)
+                    .weight(1f)
+                    .height(4.dp)
                     .clip(GuotuButtonShape)
-                    .background(GuotuColors.Signal),
+                    .background(GuotuColors.Rule),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(ratio)
+                        .height(4.dp)
+                        .clip(GuotuButtonShape)
+                        .background(GuotuColors.Signal),
+                )
+            }
+            Text(
+                text = stringResource(R.string.stats_filtered, filtered),
+                style = MaterialTheme.typography.labelSmall,
+                color = GuotuColors.InkMute,
+                maxLines = 1,
             )
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(
-                R.string.stats_breakdown,
-                stats.keep,
-                stats.pending,
-                stats.toDelete,
-                stats.moved,
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = GuotuColors.InkMute,
-        )
     }
 }
 
@@ -793,7 +775,7 @@ private fun QuickFilterRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = GuotuDimens.Page, vertical = GuotuDimens.Grid),
+                .padding(horizontal = GuotuDimens.Page, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
         ) {
             val filters = listOf(
@@ -812,8 +794,8 @@ private fun QuickFilterRow(
                         .clip(GuotuButtonShape)
                         .background(if (selected) GuotuColors.SignalSoft else Color.Transparent)
                         .clickable { onSelect(filter) }
-                        .padding(horizontal = GuotuDimens.ListGap, vertical = GuotuDimens.Grid),
-                    style = MaterialTheme.typography.labelLarge,
+                        .padding(horizontal = GuotuDimens.ListGap, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
                     color = if (selected) GuotuColors.Signal else GuotuColors.InkMute,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 )
@@ -837,14 +819,16 @@ private fun ImageGridItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
-    val parentDir = PathAbbreviator.parentDirectory(image.relativePath, image.fileName)
     val sizeLabel = FileSizeFormatter.format(image.sizeBytes)
-    val extLabel = image.ext.uppercase().ifEmpty { "VIDEO" }
+    val extLabel = image.ext.uppercase().ifEmpty { "IMG" }
     var hasThumb by remember(image.id) { mutableStateOf(false) }
 
-    Column(
+    Box(
         modifier = Modifier
-            .guotuCard(elevation = if (selected) 4.dp else GuotuDimens.CardElevation)
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(GuotuCardShape)
+            .background(Color(0xFF111827))
             .then(
                 if (selected) {
                     Modifier.border(2.dp, GuotuColors.Signal, GuotuCardShape)
@@ -854,121 +838,53 @@ private fun ImageGridItem(
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF1F2937),
-                            Color(0xFF111827),
-                            Color(0xFF0B1220),
-                        ),
-                    ),
-                ),
-        ) {
-            if (!hasThumb) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val step = 18.dp.toPx()
-                    val line = Color.White.copy(alpha = 0.045f)
-                    var x = -size.height
-                    while (x < size.width + size.height) {
-                        drawLine(
-                            color = line,
-                            start = Offset(x, 0f),
-                            end = Offset(x + size.height, size.height),
-                            strokeWidth = 1.dp.toPx(),
-                        )
-                        x += step
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .clip(GuotuButtonShape)
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        text = extLabel,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Color.White.copy(alpha = 0.88f),
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-            ImageThumbnail(
-                imageId = image.id,
-                docUri = image.docUri,
-                contentDescription = image.fileName,
-                onLoaded = { hasThumb = it },
+        if (!hasThumb) {
+            Text(
+                text = extLabel,
+                modifier = Modifier.align(Alignment.Center),
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.White.copy(alpha = 0.55f),
+                fontWeight = FontWeight.Bold,
             )
-            // 底张暗角，让大小角标更清晰
+        }
+        ImageThumbnail(
+            imageId = image.id,
+            docUri = image.docUri,
+            contentDescription = image.fileName,
+            modifier = Modifier.fillMaxSize(),
+            onLoaded = { hasThumb = it },
+        )
+        Text(
+            text = sizeLabel,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(4.dp)
+                .clip(GuotuButtonShape)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+        )
+        StatusBadge(
+            status = image.markStatus,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp),
+        )
+        if (selectionMode) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(40.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)),
-                        ),
-                    ),
-            )
-            Text(
-                text = sizeLabel,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(GuotuDimens.Grid)
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .size(18.dp)
                     .clip(GuotuButtonShape)
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
+                    .border(
+                        1.5.dp,
+                        if (selected) GuotuColors.Signal else Color.White.copy(alpha = 0.7f),
+                        GuotuButtonShape,
+                    )
+                    .background(if (selected) GuotuColors.Signal else Color.Transparent),
             )
-            StatusBadge(
-                status = image.markStatus,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(GuotuDimens.Grid),
-            )
-            if (selectionMode) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(GuotuDimens.Grid)
-                        .size(18.dp)
-                        .clip(GuotuButtonShape)
-                        .border(
-                            1.5.dp,
-                            if (selected) GuotuColors.Signal else Color.White.copy(alpha = 0.7f),
-                            GuotuButtonShape,
-                        )
-                        .background(if (selected) GuotuColors.Signal else Color.Transparent),
-                )
-            }
-        }
-        Column(modifier = Modifier.padding(GuotuDimens.ListGap)) {
-            Text(
-                text = image.fileName,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleMedium,
-                color = GuotuColors.Ink,
-                fontWeight = FontWeight.SemiBold,
-            )
-            if (parentDir != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = parentDir,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = GuotuColors.InkMute,
-                )
-            }
         }
     }
 }

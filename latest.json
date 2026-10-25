@@ -1,0 +1,7 @@
+{
+  "versionCode": 3,
+  "versionName": "1.2.0",
+  "apkFileName": "guotu-1.2.0-debug.apk",
+  "notes": "修复过图划动；JPEG 黑屏/慢加载；HEIC 支持；首页布局压缩；新应用图标；启动检测在线更新",
+  "minSupportedCode": 1
+}

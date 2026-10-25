@@ -1,5 +1,6 @@
 package com.guotu.app.ui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,11 +40,15 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -72,17 +77,37 @@ import com.guotu.app.ui.tasks.TasksScreen
 import com.guotu.app.ui.theme.GuotuColors
 import com.guotu.app.ui.theme.GuotuDimens
 import com.guotu.app.ui.theme.GuotuTheme
+import com.guotu.app.ui.update.AppUpdateHost
+import com.guotu.app.ui.update.AppUpdateViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_SHOW_UPDATE = "show_update"
+    }
+
+    private var pendingShowUpdate by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingShowUpdate = intent?.getBooleanExtra(EXTRA_SHOW_UPDATE, false) == true
         enableEdgeToEdge()
         setContent {
             GuotuTheme {
-                GuotuApp()
+                GuotuApp(
+                    openUpdateFromIntent = pendingShowUpdate,
+                    onUpdateIntentConsumed = { pendingShowUpdate = false },
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_SHOW_UPDATE, false)) {
+            pendingShowUpdate = true
         }
     }
 }
@@ -92,9 +117,25 @@ private const val ROUTE_SWIPE = "swipe/{startIndex}"
 
 @Composable
 private fun GuotuApp(
+    openUpdateFromIntent: Boolean,
+    onUpdateIntentConsumed: () -> Unit,
     viewModel: MainViewModel = hiltViewModel(),
+    updateViewModel: AppUpdateViewModel = hiltViewModel(),
 ) {
     val rootNav = rememberNavController()
+    val updateUi by updateViewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        updateViewModel.checkOnLaunch()
+    }
+    LaunchedEffect(updateUi.statusMessage) {
+        val msg = updateUi.statusMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(msg)
+        updateViewModel.clearStatusMessage()
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     // 浏览页独立于带底栏的 main，右滑返回时整页滑动，不再和底栏叠层
     NavHost(
         navController = rootNav,
@@ -107,6 +148,8 @@ private fun GuotuApp(
                 onOpenSwipe = { startIndex ->
                     rootNav.navigate("swipe/$startIndex")
                 },
+                onCheckUpdate = updateViewModel::checkManual,
+                updateChecking = updateUi.checking,
             )
         }
         composable(
@@ -148,12 +191,35 @@ private fun GuotuApp(
             }
         }
     }
+
+    SnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .padding(bottom = 72.dp),
+    )
+
+    AppUpdateHost(
+        uiState = updateUi,
+        onDismiss = updateViewModel::dismissDialog,
+        onDownload = updateViewModel::startDownload,
+        onClearStatus = updateViewModel::clearStatusMessage,
+        onOpenDialogFromIntent = {
+            updateViewModel.openUpdateDialog()
+            onUpdateIntentConsumed()
+        },
+        openFromIntent = openUpdateFromIntent,
+    )
+    }
 }
 
 @Composable
 private fun MainShell(
     showTagsTabFlow: MainViewModel,
     onOpenSwipe: (Int) -> Unit,
+    onCheckUpdate: () -> Unit,
+    updateChecking: Boolean,
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -198,6 +264,8 @@ private fun MainShell(
         MainTabNavHost(
             navController = navController,
             onOpenSwipe = onOpenSwipe,
+            onCheckUpdate = onCheckUpdate,
+            updateChecking = updateChecking,
             showTagsTab = showTagsTab,
             modifier = Modifier
                 .fillMaxSize()
@@ -210,6 +278,8 @@ private fun MainShell(
 private fun MainTabNavHost(
     navController: NavHostController,
     onOpenSwipe: (Int) -> Unit,
+    onCheckUpdate: () -> Unit,
+    updateChecking: Boolean,
     showTagsTab: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -251,7 +321,12 @@ private fun MainTabNavHost(
             )
         }
         composable(TopLevelDestination.Tasks.route) { TasksScreen() }
-        composable(TopLevelDestination.Settings.route) { SettingsScreen() }
+        composable(TopLevelDestination.Settings.route) {
+            SettingsScreen(
+                onCheckUpdate = onCheckUpdate,
+                updateChecking = updateChecking,
+            )
+        }
     }
 }
 

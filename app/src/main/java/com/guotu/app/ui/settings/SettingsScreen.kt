@@ -60,6 +60,8 @@ import androidx.compose.runtime.LaunchedEffect
 
 @Composable
 fun SettingsScreen(
+    onCheckUpdate: () -> Unit = {},
+    updateChecking: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
@@ -250,6 +252,18 @@ fun SettingsScreen(
                 ValueRow(
                     title = stringResource(R.string.app_name),
                     value = "v${BuildConfig.VERSION_NAME}",
+                )
+                GuotuHairline()
+                LinkRow(
+                    title = stringResource(R.string.settings_check_update),
+                    subtitle = if (updateChecking) {
+                        stringResource(R.string.update_downloading_short)
+                    } else {
+                        stringResource(R.string.settings_check_update_hint)
+                    },
+                    onClick = onCheckUpdate,
+                    chevron = false,
+                    actionHint = stringResource(R.string.settings_tap_to_run),
                 )
                 GuotuHairline()
                 Text(

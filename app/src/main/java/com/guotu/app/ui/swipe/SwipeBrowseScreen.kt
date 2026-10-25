@@ -9,12 +9,14 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -49,9 +52,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -61,13 +66,16 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
+import coil.compose.AsyncImagePainter
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 import com.guotu.app.R
 import com.guotu.app.domain.model.MarkStatus
 import com.guotu.app.ui.cut.CutTargetSheet
+import com.guotu.app.ui.media.GuotuImages
 import com.guotu.app.ui.util.OpenDocumentTreeContract
 import com.guotu.app.ui.util.launchDocumentTreePreferAndroid
+import kotlin.math.abs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import android.view.KeyEvent
@@ -367,6 +375,7 @@ fun SwipeBrowseScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImagePage(
     docUri: String?,
@@ -378,9 +387,10 @@ private fun ImagePage(
     onSwipeLeft: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
 ) {
-    var scale by remember(isCurrent) { mutableFloatStateOf(1f) }
-    var offset by remember(isCurrent) { mutableStateOf(Offset.Zero) }
+    var scale by remember(docUri) { mutableFloatStateOf(1f) }
+    var offset by remember(docUri) { mutableStateOf(Offset.Zero) }
     var dragX by remember { mutableFloatStateOf(0f) }
+    val zoomed = scale > 1.01f
 
     LaunchedEffect(isCurrent) {
         if (!isCurrent) {
@@ -391,10 +401,8 @@ private fun ImagePage(
         }
     }
 
-    LaunchedEffect(scale, isCurrent) {
-        if (isCurrent) {
-            onZoomChanged(scale > 1.01f)
-        }
+    LaunchedEffect(zoomed, isCurrent) {
+        if (isCurrent) onZoomChanged(zoomed)
     }
 
     DisposableEffect(isCurrent) {
@@ -415,19 +423,38 @@ private fun ImagePage(
     }
 
     val context = LocalContext.current
+    val density = LocalDensity.current
     val hapticView = LocalView.current
-    val canMarkSwipe = isCurrent && markGestureEnabled && scale <= 1.01f
+    val canMarkSwipe = isCurrent && markGestureEnabled && !zoomed
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            // 仅放大后启用单指拖移；未放大时 canPan=false，把单指留给 VerticalPager
             .then(
-                if (isCurrent && scale <= 1.01f) {
-                    Modifier.pointerInput(isCurrent) {
+                if (isCurrent) {
+                    Modifier.transformable(
+                        state = transformableState,
+                        canPan = { _ -> zoomed },
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            .then(
+                if (isCurrent) {
+                    Modifier.pointerInput(docUri, zoomed) {
                         detectTapGestures(
                             onTap = { onTap() },
-                            onDoubleTap = { onDoubleTap() },
+                            onDoubleTap = {
+                                if (zoomed) {
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                } else {
+                                    onDoubleTap()
+                                }
+                            },
                         )
                     }
                 } else {
@@ -436,10 +463,36 @@ private fun ImagePage(
             )
             .then(
                 if (canMarkSwipe) {
-                    Modifier.pointerInput(canMarkSwipe) {
+                    Modifier.pointerInput(canMarkSwipe, docUri) {
+                        val touchSlop = viewConfiguration.touchSlop
                         val threshold = size.width * 0.22f
-                        detectHorizontalDragGestures(
-                            onDragEnd = {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var totalX = 0f
+                            var totalY = 0f
+                            var axis: Int? = null // 1=X, 2=Y
+                            dragX = 0f
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) break
+                                val delta = change.positionChange()
+                                totalX += delta.x
+                                totalY += delta.y
+                                if (axis == null) {
+                                    val ax = abs(totalX)
+                                    val ay = abs(totalY)
+                                    if (ax > touchSlop || ay > touchSlop) {
+                                        axis = if (ax > ay) 1 else 2
+                                    }
+                                }
+                                if (axis == 1) {
+                                    change.consume()
+                                    dragX = totalX
+                                }
+                                // axis==Y：不 consume，交给 VerticalPager
+                            }
+                            if (axis == 1) {
                                 when {
                                     dragX > threshold -> {
                                         hapticView.performHapticFeedback(
@@ -462,21 +515,10 @@ private fun ImagePage(
                                         onSwipeLeft()
                                     }
                                 }
-                                dragX = 0f
-                            },
-                            onDragCancel = { dragX = 0f },
-                            onHorizontalDrag = { _, amount ->
-                                dragX += amount
-                            },
-                        )
+                            }
+                            dragX = 0f
+                        }
                     }
-                } else {
-                    Modifier
-                },
-            )
-            .then(
-                if (isCurrent) {
-                    Modifier.transformable(state = transformableState)
                 } else {
                     Modifier
                 },
@@ -490,15 +532,37 @@ private fun ImagePage(
         contentAlignment = Alignment.Center,
     ) {
         if (!docUri.isNullOrBlank()) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(Uri.parse(docUri))
-                    .crossfade(true)
-                    .build(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val widthPx = with(density) { maxWidth.roundToPx().coerceAtLeast(1) }
+                val heightPx = with(density) { maxHeight.roundToPx().coerceAtLeast(1) }
+                val request = remember(docUri, widthPx, heightPx) {
+                    GuotuImages.viewerRequest(context, docUri, widthPx, heightPx)
+                }
+                SubcomposeAsyncImage(
+                    model = request,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                ) {
+                    when (painter.state) {
+                        is AsyncImagePainter.State.Loading -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.align(Alignment.Center),
+                                color = Color.White.copy(alpha = 0.7f),
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                        is AsyncImagePainter.State.Error -> {
+                            Text(
+                                text = "无法显示此图片",
+                                color = Color(0xFFFFB4A8),
+                                modifier = Modifier.align(Alignment.Center),
+                            )
+                        }
+                        else -> SubcomposeAsyncImageContent()
+                    }
+                }
+            }
         }
     }
 }

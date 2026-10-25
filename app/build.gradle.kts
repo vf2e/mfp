@@ -15,8 +15,8 @@ android {
         applicationId = "com.guotu.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
     }
@@ -94,6 +94,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.coil.compose)
+    implementation(libs.coil.gif)
 
     implementation(libs.timber)
     implementation(libs.accompanist.permissions)

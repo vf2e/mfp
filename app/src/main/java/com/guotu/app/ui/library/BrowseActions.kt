@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,53 +43,50 @@ fun BrowseActionRow(
     onExportKeep: () -> Unit,
 ) {
     var moreExpanded by remember { mutableStateOf(false) }
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = GuotuDimens.Page, vertical = GuotuDimens.Grid),
-        verticalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
+            .padding(horizontal = GuotuDimens.Page, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(GuotuDimens.Grid),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(GuotuDimens.ListGap)) {
+        Text(
+            text = stringResource(R.string.action_start_browse),
+            modifier = Modifier
+                .weight(1.2f)
+                .alpha(if (browsingEnabled) 1f else 0.45f)
+                .clip(GuotuButtonShape)
+                .background(GuotuColors.Signal)
+                .clickable(enabled = browsingEnabled, onClick = onStartBrowse)
+                .padding(vertical = 10.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = GuotuColors.OnSignal,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+        if (hasLast) {
             Text(
-                text = stringResource(R.string.action_start_browse),
+                text = stringResource(R.string.action_resume_last),
                 modifier = Modifier
                     .weight(1f)
                     .alpha(if (browsingEnabled) 1f else 0.45f)
                     .clip(GuotuButtonShape)
-                    .background(GuotuColors.Signal)
-                    .clickable(enabled = browsingEnabled, onClick = onStartBrowse)
-                    .padding(vertical = 12.dp),
+                    .border(GuotuDimens.Hairline, GuotuColors.Signal, GuotuButtonShape)
+                    .clickable(enabled = browsingEnabled, onClick = onResumeLast)
+                    .padding(vertical = 10.dp),
                 style = MaterialTheme.typography.labelLarge,
-                color = GuotuColors.OnSignal,
+                color = GuotuColors.Signal,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
             )
-            if (hasLast) {
-                Text(
-                    text = stringResource(R.string.action_resume_last),
-                    modifier = Modifier
-                        .weight(1f)
-                        .alpha(if (browsingEnabled) 1f else 0.45f)
-                        .clip(GuotuButtonShape)
-                        .border(GuotuDimens.Hairline, GuotuColors.Signal, GuotuButtonShape)
-                        .clickable(enabled = browsingEnabled, onClick = onResumeLast)
-                        .padding(vertical = 12.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = GuotuColors.Signal,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                )
-            }
         }
         Box {
             Text(
                 text = stringResource(R.string.action_more),
                 modifier = Modifier
-                    .fillMaxWidth()
                     .clip(GuotuButtonShape)
                     .border(GuotuDimens.Hairline, GuotuColors.Rule, GuotuButtonShape)
                     .clickable { moreExpanded = true }
-                    .padding(vertical = 12.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 style = MaterialTheme.typography.labelLarge,
                 color = GuotuColors.Ink,
                 fontWeight = FontWeight.SemiBold,
@@ -143,12 +139,6 @@ fun BrowseActionRow(
             }
         }
     }
-    Text(
-        text = stringResource(R.string.browse_hint),
-        modifier = Modifier.padding(horizontal = GuotuDimens.Page, vertical = 4.dp),
-        style = MaterialTheme.typography.bodySmall,
-        color = GuotuColors.InkMute,
-    )
 }
 
 @Composable
@@ -157,10 +147,10 @@ fun ScanBanner(found: Int) {
         text = stringResource(R.string.scanning_progress, found),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = GuotuDimens.Page, vertical = 6.dp)
+            .padding(horizontal = GuotuDimens.Page, vertical = 4.dp)
             .clip(GuotuButtonShape)
             .background(GuotuColors.SignalSoft)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         style = MaterialTheme.typography.bodySmall,
         color = GuotuColors.Signal,
         fontWeight = FontWeight.SemiBold,
